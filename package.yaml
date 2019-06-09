@@ -1,0 +1,29 @@
+name:                linkedgram
+version:             0.1.0.0
+#synopsis:
+description:         Please see README.md
+homepage:            https://github.com/Junology/linkedgram#readme
+license:             BSD3
+author:              Jun Yoshida
+maintainer:          migi.hineri.jun@gmail.com
+copyright:           2019 Jun Yoshida
+category:            Education
+extra-source-files:
+- README.md
+
+dependencies:
+  - base >= 4.7 && < 5
+  - directory
+  - gtk
+  - cairo
+  - text
+  - mtl
+
+executables:
+  linkedgram:
+    source-dirs:      src
+    main:             Main.hs
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
