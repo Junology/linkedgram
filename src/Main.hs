@@ -162,10 +162,15 @@ main = do
   -- Signal Handlers for tool buttons
   -- Toolbar Buttons Events
   onToolButtonClicked tliNew $ do
+    -- Exit Draw mode
+    set tliDraw [toggleToolButtonActive := False]
+    -- Compute the center of the DrawingArea widget
     (wid,hei) <- widgetGetSize canvas
     let (ox,oy) = (fromIntegral wid/2.0, fromIntegral hei/2.0)
+    -- AppData to be the initial one
     writeIORef appRef $ initialAppData
     modifyIORef' appRef $ moveOrigin ox oy
+    -- Update the main window
     readIORef appRef >>= updateTitle window
     widgetQueueDraw canvas
   onToolButtonClicked tliOpen $ do
