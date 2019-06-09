@@ -27,3 +27,10 @@ executables:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
+    - -DPROJECT_NAME="linkedgram"
+    - -DPROJECT_VERSION="0.1.0.0"
+    - -DPROJECT_AUTHOR_GIVEN="Jun"
+    - -DPROJECT_AUTHOR_FAMILY="Yoshida"
+    - -DPROJECT_COPYRIGHT_YEAR="2019"
+    - -DPROJECT_LICENSE="BSD3"
+    - -DPROJECT_HOMEPAGE="https://github.com/Junology/linkedgram#readme"
