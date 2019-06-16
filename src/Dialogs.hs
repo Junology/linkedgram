@@ -1,3 +1,13 @@
+------------------------------------------------
+-- |
+-- Module    :  Dialog
+-- Copyright :  (c) Jun Yoshida 2019
+-- License   :  BSD3
+--
+-- Dialogs used in the application
+--
+------------------------------------------------
+
 module Dialogs where
 
 import qualified Data.Text as T

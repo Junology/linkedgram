@@ -1,4 +1,14 @@
-module ArcGraphCommon where
+------------------------------------------------
+-- |
+-- Module    :  ArcGraph.Common
+-- Copyright :  (c) Jun Yoshida 2019
+-- License   :  BSD3
+--
+-- Utility tools on drawing ArcGraph
+--
+------------------------------------------------
+
+module ArcGraph.Common where
 
 import Data.List
 

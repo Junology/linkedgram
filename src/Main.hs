@@ -1,3 +1,11 @@
+------------------------------------------------
+-- |
+-- Module    :  Main
+-- Copyright :  (c) Jun Yoshida 2019
+-- License   :  BSD3
+--
+------------------------------------------------
+
 module Main where
 
 import Data.Text as T
@@ -11,17 +19,11 @@ import Graphics.Rendering.Cairo as Cairo
 import Debug.Trace
 
 import ArcGraph
-import ArcGraphCairo
-import ArcGraphTikz
+import ArcGraph.Cairo
+import ArcGraph.TikZ
 import AppData
 import Dialogs
 import Config
-
--- For Debug
-testPath1 = APath ClosedPath [(0.0,0.0),(-100.0,100.0),(-200.0,0.0),(-100.0,-100.0)]
-testPath2 = APath ClosedPath [(-100.0,0.0),(0.0,100.0),(100.0,0.0),(0.0,-100.0)]
-
-testGraph = mkArcGraph Crossing [testPath1, testPath2]
 
 makeTitle :: AppData -> String
 makeTitle appData =

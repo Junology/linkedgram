@@ -1,3 +1,13 @@
+------------------------------------------------
+-- |
+-- Module    :  ArcGraph
+-- Copyright :  (c) Jun Yoshida 2019
+-- License   :  BSD3
+--
+-- The data structure of arcs and crossings of a diagram
+--
+------------------------------------------------
+
 module ArcGraph where
 
 import Control.Monad

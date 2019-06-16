@@ -1,4 +1,14 @@
-module ArcGraphCairo (
+------------------------------------------------
+-- |
+-- Module    :  ArcGraph.Cairo
+-- Copyright :  (c) Jun Yoshida 2019
+-- License   :  BSD3
+--
+-- Cairo output of ArcGraph
+--
+------------------------------------------------
+
+module ArcGraph.Cairo (
   drawVertex,
   drawArcPath,
   drawArcVertex,
@@ -14,7 +24,7 @@ import Data.List
 import qualified Graphics.Rendering.Cairo as Cairo
 
 import ArcGraph
-import ArcGraphCommon
+import ArcGraph.Common
 
 drawVertex :: Double -> Double -> Double -> Double -> Vertex -> Cairo.Render ()
 drawVertex r g b rad (x,y) = do

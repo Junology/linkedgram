@@ -1,3 +1,13 @@
+------------------------------------------------
+-- |
+-- Module    :  AppData
+-- Copyright :  (c) Jun Yoshida 2019
+-- License   :  BSD3
+--
+-- Defining the main data structure that the application is carrying.
+--
+------------------------------------------------
+
 module AppData where
 
 import Data.List

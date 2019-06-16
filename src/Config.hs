@@ -1,5 +1,15 @@
 {-# LANGUAGE CPP #-}
 
+------------------------------------------------
+-- |
+-- Module    :  Config
+-- Copyright :  (c) Jun Yoshida 2019
+-- License   :  BSD3
+--
+-- Defining basic information of the application; most are passed by the compiler.
+--
+------------------------------------------------
+
 module Config where
 
 appName :: String

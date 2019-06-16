@@ -1,4 +1,14 @@
-module ArcGraphTikz (
+------------------------------------------------
+-- |
+-- Module    :  ArcGraph.TikZ
+-- Copyright :  (c) Jun Yoshida 2019
+-- License   :  BSD3
+--
+-- LaTeX + TikZ output of ArcGraph
+--
+------------------------------------------------
+
+module ArcGraph.TikZ (
   showArcGraphTikz,
   typesetArcGraphTikz,
   docArcGraphTikz
@@ -13,7 +23,7 @@ import Data.List
 import qualified Graphics.Rendering.Cairo as Cairo
 
 import ArcGraph
-import ArcGraphCommon
+import ArcGraph.Common
 
 texHeader :: String -> String -> String
 texHeader option cls
