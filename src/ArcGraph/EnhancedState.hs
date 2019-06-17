@@ -20,6 +20,7 @@ import Data.Foldable
 import qualified Data.List as L
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as MV
+import qualified Data.Map.Strict as Map
 
 import ArcGraph
 
@@ -80,8 +81,6 @@ components ag@(AGraph ps cs) = runST $ do
     mkConnection (\x -> elem v0 x || elem v1 x) edgeMV cntRef
     -- Connect w0 <--> w1
     mkConnection (\x -> elem w0 x || elem w1 x) edgeMV cntRef
-  indcs <- V.ifoldl' (\xs i y -> (i,fst y):xs) [] <$> V.unsafeFreeze edgeMV
-  let justEqSnd (_,Just x) (_,Just y) = x==y
-      justEqSnd _ _ = False
-  return $ map (map fst) $ L.groupBy justEqSnd indcs
+  (justcls,nocls) <- V.ifoldl' (\xs i y -> case fst y of {Just k -> ((k,[i]):fst xs,snd xs); Nothing -> (fst xs,[i]:snd xs);}) ([],[]) <$> V.unsafeFreeze edgeMV
+  return $ (Map.elems $ Map.fromListWith (++) justcls) ++ nocls
 
