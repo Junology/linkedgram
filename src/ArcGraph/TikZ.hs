@@ -19,10 +19,12 @@ import Control.Monad.State.Strict
 
 import Data.Maybe
 import Data.List
+import Data.Foldable
 
 import qualified Graphics.Rendering.Cairo as Cairo
 
 import ArcGraph
+import ArcGraph.EnhancedState
 import ArcGraph.Common
 
 texHeader :: String -> String -> String
@@ -50,25 +52,47 @@ tikzBegin = "\\begin{tikzpicture}\n"
 tikzEnd :: String
 tikzEnd = "\\end{tikzpicture}\n"
 
-drawCommand :: String
-drawCommand = "\\draw[ultra thick, cap=round]"
+drawCommand :: Maybe String -> String
+drawCommand Nothing = "\\draw[ultra thick, cap=round]"
+drawCommand (Just colname) = "\\draw[" ++ colname ++ ",ultra thick, cap=round]"
 
-lineToCommand :: Vertex -> Vertex -> String
-lineToCommand v w = drawCommand ++ show v ++ " -- " ++ show w ++ ";\n"
+tikzColors :: [String]
+tikzColors = ["red",
+              "green",
+              "blue",
+              "cyan",
+              "magenta",
+              "yellow",
+              -- "black",
+              "gray",
+              "darkgray",
+              "lightgray",
+              "brown",
+              "lime",
+              "olive",
+              "orange",
+              "pink",
+              "purple",
+              "teal",
+              "violet"] -- and "white"
 
-bezierToCommand :: BezierCube -> String
-bezierToCommand (v0, v1, v2, v3)
-  = drawCommand
+lineToCommand :: Maybe String -> Vertex -> Vertex -> String
+lineToCommand colname v w
+  = drawCommand colname ++ show v ++ " -- " ++ show w ++ ";\n"
+
+bezierToCommand :: Maybe String -> BezierCube -> String
+bezierToCommand colname (v0, v1, v2, v3)
+  = drawCommand colname
     ++ " " ++ show v0
     ++ " .. controls " ++ show v1
     ++ " and " ++ show v2
     ++ " .. " ++ show v3
     ++ ";\n"
 
-showArcPathTikz :: ArcPath -> String
-showArcPathTikz pth
+showArcPathTikz :: Maybe String -> ArcPath -> String
+showArcPathTikz colname pth
   = let bs = fmap elevateBezier (mkBezier pth)
-    in foldl (++) "" $ fmap bezierToCommand bs
+    in foldl (++) "" $ fmap (bezierToCommand colname) bs
 
 showCrossTikz :: Double -> Cross -> String
 showCrossTikz bd (Crs sega segb crst)
@@ -77,26 +101,29 @@ showCrossTikz bd (Crs sega segb crst)
         (cx,cy) = fromJust $ calcCross sega segb
     in case crst of
          Crossing -> flip execState "" $ do
-           modify' (++lineToCommand v0 v1)
+           modify' (++lineToCommand Nothing v0 v1)
            let d0 = distance (w0x,w0y) (cx,cy)
-           modify' (++lineToCommand w0 (cx+bd*(w0x-cx)/d0, cy+bd*(w0y-cy)/d0))
+           modify' (++lineToCommand Nothing w0 (cx+bd*(w0x-cx)/d0, cy+bd*(w0y-cy)/d0))
            let d1 = distance (w1x,w1y) (cx,cy)
-           modify' (++lineToCommand w1 (cx+bd*(w1x-cx)/d1, cy+bd*(w1y-cy)/d1))
+           modify' (++lineToCommand Nothing w1 (cx+bd*(w1x-cx)/d1, cy+bd*(w1y-cy)/d1))
          Smooth0 -> flip execState "" $ do
            let p1 = ((v0x+2.0*cx)/3.0, (v0y+2.0*cy)/3.0)
                p2 = ((w1x+2.0*cx)/3.0, (w1y+2.0*cy)/3.0)
                q1 = ((w0x+2.0*cx)/3.0, (w0y+2.0*cy)/3.0)
                q2 = ((v1x+2.0*cx)/3.0, (v1y+2.0*cy)/3.0)
-           modify' (++bezierToCommand (v0,p1,p2,w1))
-           modify' (++bezierToCommand (w0,q1,q2,v1))
+           modify' (++bezierToCommand Nothing (v0,p1,p2,w1))
+           modify' (++bezierToCommand Nothing (w0,q1,q2,v1))
          Smooth1 -> do
            showCrossTikz bd (Crs (tposeSegment sega) segb Smooth0)
 
 showArcGraphTikz :: Double -> ArcGraph -> String
 showArcGraphTikz bd ag = flip execState "" $ do
-  let (AGraph ps cs) = normalize ag
+  let ag'@(AGraph ps cs) = slimCross $ normalize ag
   modify' (++tikzBegin)
-  modify' (++ concat (map showArcPathTikz ps))
+  for_ (zip (components ag') (cycle $ map Just tikzColors)) $ \ipsc -> do
+    let (ips,c) = ipsc
+    for_ ips $ \i -> do
+      modify' (++ showArcPathTikz c (ps!!i))
   modify' (++ concat (map (showCrossTikz bd) cs))
   modify' (++tikzEnd)
 

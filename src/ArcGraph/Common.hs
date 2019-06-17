@@ -72,9 +72,3 @@ normalize ag
            -> AGraph (map (mapArcPath vnormalizer) ps') (map (mapCross (mapSgmt vnormalizer)) cs')
          Nothing
            -> AGraph [] []
-
-listSmoothing :: [Int] -> ArcGraph -> [ArcGraph]
-listSmoothing ds (AGraph ps cs)
-  = let states = filter ((`elem` ds) . length) $ subsequences cs
-        smoothing st = map (\c -> if c `elem` st then crsSetState Smooth1 c else crsSetState Smooth0 c) cs
-    in map (AGraph ps . smoothing) states
