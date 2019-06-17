@@ -12,9 +12,16 @@ module ArcGraph where
 
 import Control.Monad
 import Control.Monad.Identity
+import Control.Monad.ST
 
 import Data.Maybe
 import Data.List as L
+import qualified Data.Vector as V
+import qualified Data.Vector.Mutable as MV
+import Data.STRef
+import Data.Foldable (for_)
+
+-- import Debug.Trace
 
 -----------
 -- Types --
@@ -263,6 +270,12 @@ mapArcPathM f (APath ty vs)
 mapArcPath :: (Vertex -> Vertex) -> ArcPath -> ArcPath
 mapArcPath = mapRemoveM mapArcPathM
 
+getEndVrtx :: ArcPath -> [Vertex]
+getEndVrtx (APath _ []) = []
+getEndVrtx (APath ClosedPath (x:_)) = [x]
+getEndVrtx (APath OpenPath (x:[])) = [x]
+getEndVrtx (APath OpenPath (x:xs@(_:_))) = [x,last xs]
+
 --------------
 -- ArcGraph --
 --------------
@@ -337,6 +350,45 @@ modifyCross n f (AGraph ps cs)
 
 countCross :: ArcGraph -> Int
 countCross (AGraph _ cs) = length cs
+
+tryGrowArcM :: (Monad m) => Vertex -> Vertex -> ArcPath -> m ArcPath
+tryGrowArcM _ _ (APath ClosedPath _) = fail ""
+tryGrowArcM _ _ (APath OpenPath []) = fail ""
+tryGrowArcM vrt vnew (APath OpenPath vs@(v:_))
+  | vrt == v       = return (APath OpenPath (vnew:vs))
+  | vrt == last vs = return (APath OpenPath (vs++[vnew]))
+  | True           = fail ""
+
+findIndexWith :: (a -> Maybe b) -> V.Vector a -> Maybe (b,Int)
+findIndexWith f xs = V.ifoldl' bin Nothing xs
+  where
+    bin Nothing i x = case f x of {Just y -> Just (y,i); Nothing -> Nothing;}
+    bin j@(Just _) _ _  = j
+
+slimCross :: ArcGraph -> ArcGraph
+slimCross (AGraph ps cs) = runST $ do
+  psMVecRef <- newSTRef =<< (V.thaw $ V.fromList ps)
+  csMVec <- V.thaw $ V.fromList cs
+  for_  [0..(length cs-1)] $ \i -> do
+    let (Crs sega@(Sgmt v0 v1) segb@(Sgmt w0 w1) crst) = (cs!!i)
+        c = fromJust $ calcCross sega segb
+        vs'@(v0':v1':w0':w1':_) = map (\v -> barycenter [v,c]) [v0,v1,w0,w1]
+    for_ [0..3] $ \k -> do
+      let v = [v0,v1,w0,w1]!!k
+          v'= vs'!!k
+      psVec <- V.freeze =<< readSTRef psMVecRef
+      case findIndexWith (tryGrowArcM v v') psVec of
+        Just (p,j) -> do
+          psMVec <- readSTRef psMVecRef
+          MV.write psMVec j p
+        Nothing -> do
+          writeSTRef psMVecRef =<< flip MV.unsafeGrow 1 =<< readSTRef psMVecRef
+          psMVec <- readSTRef psMVecRef
+          MV.write psMVec (MV.length psMVec-1) (APath OpenPath [v,v'])
+    MV.write csMVec i $ Crs (Sgmt v0' v1') (Sgmt w0' w1') crst
+  ps' <- V.toList <$> (V.freeze =<< readSTRef psMVecRef)
+  cs' <- V.toList <$> V.freeze csMVec
+  return (AGraph ps' cs')
 
 -------------
 -- HitTest --
