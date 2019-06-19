@@ -24,17 +24,18 @@ import Dialogs
 import Config
 
 
-{--------------
+{---------------
 -- For Debug --
 ---------------
 import ArcGraph.EnhancedState
+import Numeric.Algebra.FreeModule
 import Debug.Trace
 
 trefoil :: ArcGraph
-trefoil = AGraph [APath OpenPath [(-60.0,-52.0),(-124.0,-53.0),(-171.0,67.0),(-135.0,187.0),(-63.0,191.0)],APath OpenPath [(65.0,-56.0),(132.0,-56.0),(180.0,68.0),(128.0,182.0),(62.0,187.0)]] [Crs (Sgmt (-63.0,191.0) (63.0,140.0)) (Sgmt (-67.0,141.0) (62.0,187.0)) Crossing,Crs (Sgmt (63.0,94.0) (-67.0,141.0)) (Sgmt (63.0,140.0) (-67.0,93.0)) Crossing,Crs (Sgmt (63.0,94.0) (-67.0,48.0)) (Sgmt (-67.0,93.0) (66.0,44.0)) Crossing,Crs (Sgmt (64.0,-4.0) (-67.0,48.0)) (Sgmt (66.0,44.0) (-66.0,-4.0)) Crossing,Crs (Sgmt (-66.0,-4.0) (65.0,-56.0)) (Sgmt (-60.0,-52.0) (64.0,-4.0)) Crossing]
+trefoil = slimCross $ AGraph [APath OpenPath [(-60.0,-52.0),(-124.0,-53.0),(-171.0,67.0),(-135.0,187.0),(-63.0,191.0)],APath OpenPath [(65.0,-56.0),(132.0,-56.0),(180.0,68.0),(128.0,182.0),(62.0,187.0)]] [Crs (Sgmt (-63.0,191.0) (63.0,140.0)) (Sgmt (-67.0,141.0) (62.0,187.0)) Crossing,Crs (Sgmt (63.0,94.0) (-67.0,141.0)) (Sgmt (63.0,140.0) (-67.0,93.0)) Crossing,Crs (Sgmt (63.0,94.0) (-67.0,48.0)) (Sgmt (-67.0,93.0) (66.0,44.0)) Crossing,Crs (Sgmt (64.0,-4.0) (-67.0,48.0)) (Sgmt (66.0,44.0) (-66.0,-4.0)) Crossing,Crs (Sgmt (-66.0,-4.0) (65.0,-56.0)) (Sgmt (-60.0,-52.0) (64.0,-4.0)) Crossing]
 
 testSmooth :: ArcGraph
-testSmooth = L.last $ listSmoothing [1] $ slimCross trefoil
+testSmooth = L.last $ listSmoothing [1] trefoil
 
 -----------------
 -----------------}
@@ -84,6 +85,10 @@ mainDraw wid hei appData = do
 
 main :: IO ()
 main = do
+  {-- Debug
+  print $ genMatrix differential (L.concatMap enhancedStatesL (listSmoothing [1] trefoil)) (L.concatMap enhancedStatesL (listSmoothing [2] trefoil))
+  --}--
+
   -- Fix the size of the main window
   let winWidth = 640
   let winHeight = 480

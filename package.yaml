@@ -15,8 +15,11 @@ dependencies:
   - base >= 4.7 && < 5
   - mtl
   - containers
+  - monad-loops
   - vector
   - text
+  - matrix
+  - hmatrix
   - directory
   - gtk
   - cairo

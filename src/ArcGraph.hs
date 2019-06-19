@@ -1,3 +1,6 @@
+{-# LANGUAGE Strict #-}
+{-# LANGUAGE StrictData #-}
+
 ------------------------------------------------
 -- |
 -- Module    :  ArcGraph
@@ -45,26 +48,45 @@ data PathType = OpenPath | ClosedPath
   deriving (Eq, Read, Show)
 
 data ArcPath = APath PathType [Vertex]
-  deriving (Show, Read)
+  deriving (Eq,Show, Read)
 
 data CrsState = Crossing | Smooth0 | Smooth1
-  deriving (Show, Read)
+  deriving (Eq,Show, Read)
+
+instance Ord CrsState where
+  compare Smooth0 Smooth0 = EQ
+  compare Smooth0 Crossing = LT
+  compare Smooth0 Smooth1 = LT
+  compare Crossing Smooth0 = GT
+  compare Crossing Crossing = EQ
+  compare Crossing Smooth1 = LT
+  compare Smooth1 Smooth0 = GT
+  compare Smooth1 Crossing = GT
+  compare Smooth1 Smooth1 = EQ
 
 data Cross = Crs Segment Segment CrsState
   deriving (Show, Read)
 
--- Segment is unordered
+-- | Segment is unordered
 instance Eq Segment where
   (Sgmt v0 v1) == (Sgmt w0 w1)
     = (v0==w0 && v1==w1) || (v0==w1 && v1==w0)
 
--- Cross is unordered
+-- | The order of segments in Cross is irrelevant
 instance Eq Cross where
   (Crs sega segb _) == (Crs segc segd _)
     = (sega == segc && segb == segd) || (sega == segd && segb == segc)
 
+-- | Cross are ordered in terms of crossing states
+instance Ord Cross where
+  compare (Crs _ _ crst) (Crs _ _ crst') = compare crst crst'
+
 data ArcGraph = AGraph [ArcPath] [Cross]
-  deriving (Show, Read)
+  deriving (Eq,Show, Read)
+
+-- | Order comparison on crossings
+instance Ord ArcGraph where
+  compare (AGraph _ cs) (AGraph _ cs') = compare cs cs'
 
 -----------------------
 -- Utility Functions --
@@ -347,6 +369,9 @@ arcGraphVrtx (AGraph ps cs) = concatMap arcVertices ps ++ concatMap crsVrtx cs
 modifyCross :: Int -> (Cross -> Cross) -> ArcGraph -> ArcGraph
 modifyCross n f (AGraph ps cs)
   = AGraph ps (mapAt n f cs)
+
+setCrsState :: Int -> CrsState -> ArcGraph -> ArcGraph
+setCrsState n crst = modifyCross n (crsSetState crst)
 
 countCross :: ArcGraph -> Int
 countCross (AGraph _ cs) = length cs
