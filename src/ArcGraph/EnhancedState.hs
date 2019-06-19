@@ -145,7 +145,7 @@ differential :: ArcGraphE -> FreeMod Int ArcGraphE
 differential (AGraphE ag coeffMap) =
   let dStVec = diffState ag
       comps = components ag
-  in sumFM $ runST $ do
+  in FM.sumFM $ runST $ do
     imageMV <- MV.unsafeNew (V.length dStVec)
     for_ [0..(V.length dStVec -1)] $ \i -> do
       let (sign,dAg) = (dStVec V.! i)

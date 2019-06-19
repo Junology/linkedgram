@@ -20,7 +20,9 @@ import ArcGraph
 import ArcGraph.Cairo
 import ArcGraph.TikZ
 import AppData
-import Dialogs
+import Dialog
+import Dialog.Export
+import Dialog.Khovanov
 import Config
 
 
@@ -154,6 +156,13 @@ main = do
   ---------------------------------------------
   tliSep2 <- separatorToolItemNew
   ---------------------------------------------
+  tliKhov <- toolButtonNewFromStock stockInfo
+  set tliKhov [
+    toolButtonLabel := Just "View Chain Complex",
+    toolButtonIconName := "label"]
+  ---------------------------------------------
+  tliSep3 <- separatorToolItemNew
+  ---------------------------------------------
   tliAbout <- toolButtonNewFromStock stockAbout
   set tliAbout [
     toolButtonLabel := Just "About",
@@ -169,6 +178,8 @@ main = do
   toolbarInsert tlbar tliDrawCon (-1)
   toolbarInsert tlbar tliDrawDis (-1)
   toolbarInsert tlbar tliSep2 (-1)
+  toolbarInsert tlbar tliKhov (-1)
+  toolbarInsert tlbar tliSep3 (-1)
   toolbarInsert tlbar tliAbout (-1)
 
   -- Create Application Data
@@ -186,8 +197,9 @@ main = do
     -- Exit Draw mode
     set tliDraw [toggleToolButtonActive := False]
     -- Compute the center of the DrawingArea widget
-    (wid,hei) <- widgetGetSize canvas
-    let (ox,oy) = (fromIntegral wid/2.0, fromIntegral hei/2.0)
+    wid <- fromIntegral <$> widgetGetAllocatedWidth canvas
+    hei <- fromIntegral <$> widgetGetAllocatedHeight canvas
+    let (ox,oy) = (wid/2.0, hei/2.0)
     -- AppData to be the initial one
     writeIORef appRef $ initialAppData
     modifyIORef' appRef $ moveOrigin ox oy
@@ -199,9 +211,10 @@ main = do
     case maypath of
       Just path -> do
         content <- readFile path
-        (wid, hei) <- liftIO $ widgetGetSize canvas
-        let ox = fromIntegral wid / 2.0
-            oy = fromIntegral hei / 2.0
+        wid <- fromIntegral <$> widgetGetAllocatedWidth canvas
+        hei <- fromIntegral <$> widgetGetAllocatedHeight canvas
+        let ox = wid / 2.0
+            oy = hei / 2.0
         writeIORef appRef $ openAppData path ox oy (read content)
       Nothing ->
         return ()
@@ -263,6 +276,9 @@ main = do
             _ -> undefined
     readIORef appRef >>= updateTitle window
     widgetQueueDraw canvas
+  onToolButtonClicked tliKhov $ do
+    appData <- readIORef appRef
+    showKhovanovDialog (arcGraph appData) (Just window)
   onToolButtonClicked tliAbout $ do
     showAboutDialog (Just window)
 
@@ -273,7 +289,7 @@ main = do
     button <- eventButton
     click <- eventClick
     (mx,my') <- eventCoordinates
-    (_, hei) <- liftIO $ widgetGetSize canvas
+    hei <- liftIO $ widgetGetAllocatedHeight canvas
     let my = fromIntegral hei - my'
     modifs <- eventModifier
     case (button,click) of
@@ -291,7 +307,7 @@ main = do
     Gtk.LeftButton <- eventButton
     liftIO $ writeIORef btnRef False
     (mx,my') <- eventCoordinates
-    (_, hei) <- liftIO $ widgetGetSize canvas
+    hei <- liftIO $ widgetGetAllocatedHeight canvas
     let my = fromIntegral hei - my'
     liftIO $ modifyIORef' appRef $ mouseUp mx my
     liftIO $ readIORef appRef >>= updateTitle window
@@ -299,23 +315,23 @@ main = do
   canvas `on` motionNotifyEvent $ tryEvent $ do
     True <- liftIO $ readIORef btnRef
     (mx,my') <- eventCoordinates
-    (_, hei) <- liftIO $ widgetGetSize canvas
+    hei <- liftIO $ widgetGetAllocatedHeight canvas
     let my = fromIntegral hei - my'
     liftIO $ modifyIORef' appRef $ mouseDrag mx my
 
   -- Signal Handlers for DrawingWindow
   widgetAddEvents canvas [PointerMotionMask,KeyPressMask]
-  canvas `on` exposeEvent $ tryEvent $ do
-    drawing <- eventWindow
+  canvas `on` draw $ do
     appData <- liftIO $ readIORef appRef
-    (wid,hei) <- liftIO $ widgetGetSize canvas
-    let (w,h) = (fromIntegral wid, fromIntegral hei)
-    liftIO $ renderWithDrawable drawing $ mainDraw w h appData
+    wid <- liftIO $ fromIntegral <$> widgetGetAllocatedWidth canvas
+    hei <- liftIO $ fromIntegral <$> widgetGetAllocatedHeight canvas
+    mainDraw wid hei appData
 
   -- Show Main Window
   widgetShowAll window
-  (wid,hei) <- widgetGetSize canvas
-  let (ox,oy) = (fromIntegral wid/2.0, fromIntegral hei/2.0)
+  wid <- fromIntegral <$> widgetGetAllocatedWidth canvas
+  hei <- fromIntegral <$> widgetGetAllocatedHeight canvas
+  let (ox,oy) = (wid/2.0, hei/2.0)
   modifyIORef' appRef $ moveOrigin ox oy
 
   -- Start Main Loop

@@ -21,7 +21,7 @@ dependencies:
   - matrix
   - hmatrix
   - directory
-  - gtk
+  - gtk3
   - cairo
 
 executables:

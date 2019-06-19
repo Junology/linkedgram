@@ -60,13 +60,13 @@ mkBezier pth
             y'2 = (y1+y2)/2.0
         in ((x'0,y'0), (x1,y1), (x'2,y'2))
 
-normalize :: ArcGraph -> ArcGraph
-normalize ag
+normalize :: Double -> ArcGraph -> ArcGraph
+normalize rad ag
   = let vstot = nub $ arcGraphVrtx ag
         c@(cx,cy) = barycenter vstot
         mayag' = moveVrtx vstot (negate cx) (negate cy) ag
         maxrad = maximum $ map (distance c) vstot
-        vnormalizer = \x -> (fst x/maxrad, snd x/maxrad)
+        vnormalizer = \x -> (rad * fst x/maxrad, rad * snd x/maxrad)
     in case mayag' of
          Just (AGraph ps' cs')
            -> AGraph (map (mapArcPath vnormalizer) ps') (map (mapCross (mapSgmt vnormalizer)) cs')

@@ -118,7 +118,7 @@ showCrossTikz bd (Crs sega segb crst)
 
 showArcGraphTikz :: Double -> ArcGraph -> String
 showArcGraphTikz bd ag = flip execState "" $ do
-  let ag'@(AGraph ps cs) = slimCross $ normalize ag
+  let ag'@(AGraph ps cs) = slimCross $ normalize 1.0 ag
   modify' (++tikzBegin)
   for_ (zip (components ag') (cycle $ map Just tikzColors)) $ \ipsc -> do
     let (ips,c) = ipsc
