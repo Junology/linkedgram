@@ -13,7 +13,7 @@ module Dialog.Khovanov where
 import Control.Monad
 
 import qualified Data.Text as T
-import Data.List
+import Data.List as L
 import qualified Data.Map.Strict as Map
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as MV
@@ -30,6 +30,10 @@ import ArcGraph.Common
 import ArcGraph.EnhancedState
 import ArcGraph.Cairo
 
+import Numeric.Algebra.FreeModule
+import Numeric.Algebra.Frobenius
+import Numeric.Algebra.IntMatrix
+
 pictSize :: Num a => a
 pictSize = fromIntegral 80
 
@@ -45,6 +49,7 @@ genPixbufArcGraph ag deg = do
       Cairo.setSourceRGB 1.0 1.0 1.0
       Cairo.paint
       Cairo.translate (pictSize / 2.0) (pictSize / 2.0)
+      Cairo.scale 1.0 (-1.0)
       Cairo.setSourceRGB 1.0 0.0 0.0
       drawArcGraph ag Nothing
     pixbuf <- pixbufNewFromSurface surface 0 0 pictSize pictSize
@@ -92,8 +97,8 @@ showKhovanovDialog ag mayparent = do
     windowDefaultWidth := 640,
     windowDefaultHeight := 480 ]
   -- Add buttons
-  dialogAddButton khovanovDlg "Compute" ResponseOk
-  dialogAddButton khovanovDlg "Close" ResponseCancel
+  btnCompute <- dialogAddButton khovanovDlg "Compute" ResponseOk
+  btnClose <- dialogAddButton khovanovDlg "Close" ResponseCancel
 
   -- Add HBox to contain smoothing diagrams
   hboxSm <- hBoxNew True 0
@@ -115,7 +120,27 @@ showKhovanovDialog ag mayparent = do
   containerAdd scroll hboxSm
   widgetShowAll khovanovDlg
 
-  -- Run dialog
-  resp <- dialogRun khovanovDlg
-  widgetDestroy khovanovDlg
+  -- Compute (unnormalized) Khovanov homology
+  btnCompute `on` buttonActivated $ do
+    forM_ [1..(MV.length listMVec - 1)] $ \i -> do
+      -- Get selecteds in the previous column
+      (smthList0,agView0) <- MV.read listMVec (i-1)
+      smth0 <- mapM (listStoreGetValue smthList0) =<< map head <$> iconViewGetSelectedItems agView0
+      let smth0Enh = L.concatMap (enhancedStatesL . slimCross) smth0
+      -- Get selecteds in the current column
+      (smthList1,agView1) <- MV.read listMVec i
+      smth1 <- mapM (listStoreGetValue smthList1) =<< map head <$> iconViewGetSelectedItems agView1
+      let smth1Enh = L.concatMap (enhancedStatesL . slimCross) smth1
+      unless (L.null smth0 || L.null smth1) $ do
+        -- Print the diff matrix
+        putStrLn $ "diff " ++ show i
+        let (_,h,_) = smithNF $ matiDataToLA $ genMatrix differential smth0Enh smth1Enh
+        print $ matiLAToData h
 
+  -- Close the dialog when "Close" is pressed
+  btnClose `on` buttonActivated $ do
+    widgetDestroy khovanovDlg
+
+  -- Run dialog
+  dialogRun khovanovDlg
+  return ()
