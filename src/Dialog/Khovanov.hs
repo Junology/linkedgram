@@ -87,6 +87,7 @@ createArcGraphView ag deg = do
 showKhovanovDialog :: ArcGraph -> Maybe Window -> IO ()
 showKhovanovDialog ag mayparent = do
   -- Create Dialog and set the parent
+  let slimAG = slimCross ag
   khovanovDlg <- dialogNew
   case mayparent of
     Just win -> set khovanovDlg [windowTransientFor := win]
@@ -97,14 +98,13 @@ showKhovanovDialog ag mayparent = do
     windowDefaultWidth := 640,
     windowDefaultHeight := 480 ]
   -- Add buttons
-  btnCompute <- dialogAddButton khovanovDlg "Compute" ResponseOk
-  btnClose <- dialogAddButton khovanovDlg "Close" ResponseCancel
+  btnClose <- dialogAddButton khovanovDlg "Close" ResponseOk
 
   -- Add HBox to contain smoothing diagrams
   hboxSm <- hBoxNew True 0
-  listMVec <- MV.unsafeNew (countCross ag+1)
-  forM_ [0..countCross ag] $ \i -> do
-    (smthList,arcGraphView) <- createArcGraphView ag i
+  listMVec <- MV.unsafeNew (countCross slimAG+1)
+  forM_ [0..countCross slimAG] $ \i -> do
+    (smthList,arcGraphView) <- createArcGraphView slimAG i
     set arcGraphView [
       iconViewSelectionMode := SelectionMultiple,
       iconViewColumns := 1 ]
@@ -113,32 +113,45 @@ showKhovanovDialog ag mayparent = do
 
   -- Add containers
   vbox <- castToBox <$> dialogGetContentArea khovanovDlg
+  set vbox [ boxHomogeneous := False ]
+  -- Scroll window containing the list of states
   scroll <- scrolledWindowNew Nothing Nothing
   scrolledWindowSetPolicy scroll PolicyAutomatic PolicyAutomatic
   scrolledWindowSetShadowType scroll ShadowIn
   boxPackStart vbox scroll PackGrow 0
   containerAdd scroll hboxSm
+  -- Spin button to determine a quantum degree to compute
+  btnCompute <- buttonNewWithLabel "Compute"
+  let maxQDeg = fromIntegral $ let (AGraph ps _) = slimAG in L.length ps
+  spinQDeg <-spinButtonNewWithRange (-maxQDeg) maxQDeg 1
+  hbtnbox <- hButtonBoxNew
+  boxPackStart hbtnbox spinQDeg PackNatural 0
+  boxPackStart hbtnbox btnCompute PackNatural 0
+  boxPackStart vbox hbtnbox PackNatural 0
   widgetShowAll khovanovDlg
 
   -- Compute (unnormalized) Khovanov homology
   btnCompute `on` buttonActivated $ do
+    qdeg <- spinButtonGetValueAsInt spinQDeg
+    baseMVec <- MV.unsafeNew (MV.length listMVec)
+    forM_ [0..(MV.length listMVec - 1)] $ \i -> do
+      -- Get selected states at coh.degree i
+      (smthList,agView) <- MV.read listMVec i
+      smth <- mapM (listStoreGetValue smthList)
+              =<< map head <$> iconViewGetSelectedItems agView
+      MV.write baseMVec i $ L.concatMap (enhancedStatesL (qdeg -i)) smth
+    putStrLn $ "---- q-degree = " ++ show qdeg ++ " ----"
     forM_ [1..(MV.length listMVec - 1)] $ \i -> do
-      -- Get selecteds in the previous column
-      (smthList0,agView0) <- MV.read listMVec (i-1)
-      smth0 <- mapM (listStoreGetValue smthList0) =<< map head <$> iconViewGetSelectedItems agView0
-      let smth0Enh = L.concatMap (enhancedStatesL . slimCross) smth0
-      -- Get selecteds in the current column
-      (smthList1,agView1) <- MV.read listMVec i
-      smth1 <- mapM (listStoreGetValue smthList1) =<< map head <$> iconViewGetSelectedItems agView1
-      let smth1Enh = L.concatMap (enhancedStatesL . slimCross) smth1
-      unless (L.null smth0 || L.null smth1) $ do
+      base0 <- MV.read baseMVec (i-1)
+      base1 <- MV.read baseMVec i
+      unless (L.null base0 || L.null base1) $ do
         -- Print the diff matrix
         putStrLn $ "diff " ++ show i
         {-
         let (_,h,_) = smithNF $ matiDataToLA $ genMatrix differential smth0Enh smth1Enh
         print $ matiLAToData h
         -}
-        let (dvec,_,_) = kerImOf $ matiDataToLA $ genMatrix differential smth0Enh smth1Enh
+        let (dvec,_,_) = kerImOf $ matiDataToLA $ genMatrix differential base0 base1
         print $ vectiLAToData dvec
 
   -- Close the dialog when "Close" is pressed

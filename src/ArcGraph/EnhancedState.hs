@@ -107,21 +107,24 @@ instance Ord ArcGraphE where
         GT -> GT
         EQ -> compare coeff coeff'
 
-enhancements :: ArcGraph -> V.Vector (Map.Map [Int] SL2B)
-enhancements ag = runST $ do
+enhancements :: Int -> ArcGraph -> V.Vector (Map.Map [Int] SL2B)
+enhancements deg ag = runST $ do
   let comps = components ag
-      subis = zip [0..] $ L.subsequences comps
+      deg' = deg + L.length comps
+      subis = zip [0..] $ filter (\sub -> 2*L.length sub == deg') $ L.subsequences comps
   mapMV <- MV.unsafeNew (length subis) -- Do not need to initialize the memory
   for_ subis $ \subi -> do
     let (i,sub) = subi
     MV.write mapMV i $ L.foldl' (\xs y -> Map.insert y (if elem y sub then SLI else SLX) xs) Map.empty comps
   V.unsafeFreeze mapMV
 
-enhancedStates :: ArcGraph -> V.Vector ArcGraphE
-enhancedStates ag = V.map (AGraphE ag) $ enhancements ag
+enhancedStates :: Int -> ArcGraph -> V.Vector ArcGraphE
+enhancedStates deg ag
+  = V.map (AGraphE ag) $ enhancements deg ag
 
-enhancedStatesL :: ArcGraph -> [ArcGraphE]
-enhancedStatesL ag = V.foldr' (\x xs -> (AGraphE ag x):xs) [] $ enhancements ag
+enhancedStatesL :: Int -> ArcGraph -> [ArcGraphE]
+enhancedStatesL deg ag
+  = V.foldr' (\x xs -> (AGraphE ag x):xs) [] $ enhancements deg ag
 
 -- | Compute next states with sign in differential.
 -- On determining signs, we use the descending order on corssings.

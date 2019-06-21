@@ -1,5 +1,6 @@
 .stack-work/
-linkedgram.cabal
+*.cabal
+*.prof
 *~
 test/*
 
