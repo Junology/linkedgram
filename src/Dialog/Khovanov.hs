@@ -108,6 +108,7 @@ showKhovanovDialog ag mayparent = do
     set arcGraphView [
       iconViewSelectionMode := SelectionMultiple,
       iconViewColumns := 1 ]
+    iconViewSelectAll arcGraphView
     MV.write listMVec i (smthList,arcGraphView)
     boxPackStart hboxSm arcGraphView PackNatural 3
 
