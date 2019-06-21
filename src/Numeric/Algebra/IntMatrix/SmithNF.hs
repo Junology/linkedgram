@@ -15,15 +15,12 @@ import Control.Monad.ST
 import Control.Monad.Loops (whileM_, whileJust_)
 
 import Data.List as L
-import Data.Maybe
 import Data.STRef
 
 import Numeric.LinearAlgebra as LA
 import Numeric.LinearAlgebra.Devel
 
 import Numeric.Algebra.IntMatrix.HNFLLL (hnfLLLST)
-
-import Debug.Trace
 
 -- | Find off-diagonal entries and calculate min of min{row,col} among them
 findDiagSz :: LA.Matrix LA.Z -> Maybe Int
@@ -58,6 +55,7 @@ isHeadGCD = isHeadGCD' . LA.toList
     isHeadGCD' [] = True
     isHeadGCD' (x:xs) = L.foldl' (\b y -> b && rem y x == 0) True xs
 
+-- Compute the submatrix containing all the non-zero diagonal entries
 extractMaxNZDiag :: LA.Matrix LA.Z -> (Int,LA.Matrix LA.Z)
 extractMaxNZDiag mx = runST $ do
   dRef <- newSTRef 0

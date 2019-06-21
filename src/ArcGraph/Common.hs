@@ -10,7 +10,12 @@
 
 module ArcGraph.Common where
 
+import Control.Monad
+import Control.Monad.ST
+
 import Data.List
+import Data.Maybe
+import Data.STRef
 
 import ArcGraph
 
@@ -72,3 +77,15 @@ normalize rad ag
            -> AGraph (map (mapArcPath vnormalizer) ps') (map (mapCross (mapSgmt vnormalizer)) cs')
          Nothing
            -> AGraph [] []
+
+findMostVrtx :: Foldable t => (Vertex -> Vertex -> Bool) -> t ArcPath -> Maybe Vertex
+findMostVrtx comp as = runST $ do
+  vRef <- newSTRef Nothing
+  forM_ as $ \path -> do
+    let (APath _ vs) = path
+    forM_ vs $ \v -> do
+      mayXY <- readSTRef vRef
+      when (mayXY == Nothing || comp (fromJust mayXY) v) $ writeSTRef vRef (Just v)
+  readSTRef vRef
+
+

@@ -161,13 +161,10 @@ orientation (ax,ay) (bx,by) (cx,cy)
         | det > 0  -> Positive
         | det == 0 -> Zero
 
-barycenter :: [Vertex] -> Vertex
-barycenter [] = (0.0,0.0)
-barycenter vs@(_:_)
-  = let l = fromIntegral (length vs)
-    in mapPair ((/l) . sum) $ unzip vs
+barycenter :: Foldable f => f Vertex -> Vertex
+barycenter vs = let l = length vs in foldl' (mapSum l) (0.0,0.0) vs
   where
-    mapPair f (x,y) = (f x, f y)
+    mapSum l (x0,y0) (x1,y1) = (x0+(x1/fromIntegral l), y0+(y1/fromIntegral l))
 
 --------------
 -- Segments --

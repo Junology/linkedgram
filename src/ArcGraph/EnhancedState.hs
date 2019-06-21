@@ -94,8 +94,10 @@ components ag@(AGraph ps cs) = runST $ do
   (justcls,nocls) <- V.ifoldl' (\xs i y -> case fst y of {Just k -> ((k,[i]):fst xs,snd xs); Nothing -> (fst xs,[i]:snd xs);}) ([],[]) <$> V.unsafeFreeze edgeMV
   return $ (Map.elems $ Map.fromListWith (++) justcls) ++ nocls
 
-data ArcGraphE = AGraphE ArcGraph (Map.Map [Int] SL2B)
-  deriving (Eq,Show)
+data ArcGraphE = AGraphE {
+  state :: ArcGraph,
+  enhLabel :: (Map.Map [Int] SL2B)
+  } deriving (Eq,Show)
 
 -- | Lexicographical order on ArcGraphE
 instance Ord ArcGraphE where
@@ -144,7 +146,6 @@ hasIntersection x y = not $ L.null (x `L.intersect` y)
 differential :: ArcGraphE -> FreeMod Int ArcGraphE
 differential (AGraphE ag coeffMap) =
   let dStVec = diffState ag
-      comps = components ag
   in FM.sumFM $ runST $ do
     imageMV <- MV.unsafeNew (V.length dStVec)
     for_ [0..(V.length dStVec -1)] $ \i -> do

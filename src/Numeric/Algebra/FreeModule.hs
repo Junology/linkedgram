@@ -13,6 +13,8 @@
 
 module Numeric.Algebra.FreeModule where
 
+import Control.Applicative
+
 import qualified Data.List as L
 
 import Data.Map.Strict (Map)
@@ -45,13 +47,20 @@ getCoeff :: (Num a, Ord b) => b -> FreeMod a b -> a
 getCoeff x (FMod mp) =
   case Map.lookup x mp of
     Just coeff -> coeff
-    Nothing -> fromIntegral 0
+    Nothing -> 0
 
 spanning :: FreeMod a b -> [b]
 spanning (FMod mp) = Map.keys mp
 
 removeZero :: (Num a, Eq a) => FreeMod a b -> FreeMod a b
-removeZero (FMod x) = FMod $ Map.filter (/=fromIntegral 0) x
+removeZero (FMod x) = FMod $ Map.filter (/=0) x
+
+forEachWithInterM :: Monad m => (a -> b -> m ()) -> (m ()) -> FreeMod a b -> m ()
+forEachWithInterM f g (FMod mp) = do
+  forM_ (L.intersperse Nothing (map Just (Map.toList mp))) $ \maymp -> do
+    case maymp of
+      Just (x,r) -> f r x
+      Nothing -> g
 
 ---------------------------------
 -- Basic Arithmetic operations --
@@ -71,12 +80,12 @@ zeroVec = FMod (Map.empty)
 
 (@*@) r x = removeZero (r @*@% x)
 
-(@*%) :: (Eq a, Num a) => a -> FreeMod a b -> FreeMod a b
+(@*%) :: (Num a) => a -> FreeMod a b -> FreeMod a b
 (@*%) r (FMod mp) = FMod $ Map.map (r*) mp
 
 (@*) r x = removeZero (r @* x)
 
-(@+%) :: (Eq a, Num a, Ord b) => FreeMod a b -> FreeMod a b -> FreeMod a b
+(@+%) :: (Num a, Ord b) => FreeMod a b -> FreeMod a b -> FreeMod a b
 (@+%) (FMod mp) (FMod mq) = FMod $ Map.unionWith (+) mp mq
 
 (@+) x y = removeZero (x @+% y)
@@ -124,8 +133,19 @@ infixr 1 @$>%
 -----------------------
 -- Tensor operations --
 -----------------------
+sumFM' :: (Num a, Ord b, Foldable t) => t (FreeMod a b) -> FreeMod a b
+sumFM' = foldl' (@+%) zeroVec
+
 sumFM :: (Eq a, Num a, Ord b, Foldable t) => t (FreeMod a b) -> FreeMod a b
-sumFM = removeZero . foldl' (@+%) zeroVec
+sumFM = removeZero . sumFM'
+
+zipSum' :: (Foldable t, Applicative t, Num a, Ord b)
+  => t a -> t b -> FreeMod a b
+zipSum' rs es = foldl' (@+%) zeroVec $ liftA2 (@*@%) rs es
+
+zipSum :: (Eq a, Foldable t, Applicative t, Num a, Ord b)
+  => t a -> t b -> FreeMod a b
+zipSum rs es = removeZero $ zipSum' rs es
 
 tensorWith :: (Eq a, Num a, Ord b, Ord c, Ord d)
   => (b -> c -> d) -> FreeMod a b -> FreeMod a c -> FreeMod a d

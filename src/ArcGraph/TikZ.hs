@@ -19,9 +19,11 @@ import Control.Monad.State.Strict
 
 import Data.Maybe
 import Data.List
+import qualified Data.Map.Strict as Map
 import Data.Foldable
 
-import qualified Graphics.Rendering.Cairo as Cairo
+import Numeric.Algebra.FreeModule
+import Numeric.Algebra.Frobenius
 
 import ArcGraph
 import ArcGraph.EnhancedState
@@ -55,6 +57,9 @@ tikzEnd = "\\end{tikzpicture}\n"
 drawCommand :: Maybe String -> String
 drawCommand Nothing = "\\draw[ultra thick, cap=round]"
 drawCommand (Just colname) = "\\draw[" ++ colname ++ ",ultra thick, cap=round]"
+
+nodeCommand :: Double -> Double -> String -> String
+nodeCommand x y str = "\\node at " ++ show (x,y) ++ "{" ++ str ++ "};"
 
 tikzColors :: [String]
 tikzColors = ["red",
@@ -119,13 +124,34 @@ showCrossTikz bd (Crs sega segb crst)
 showArcGraphTikz :: Double -> ArcGraph -> String
 showArcGraphTikz bd ag = flip execState "" $ do
   let ag'@(AGraph ps cs) = slimCross $ normalize 1.0 ag
-  modify' (++tikzBegin)
   for_ (zip (components ag') (cycle $ map Just tikzColors)) $ \ipsc -> do
     let (ips,c) = ipsc
     for_ ips $ \i -> do
       modify' (++ showArcPathTikz c (ps!!i))
   modify' (++ concat (map (showCrossTikz bd) cs))
-  modify' (++tikzEnd)
+
+showArcGraphEnhTikz :: Double -> ArcGraphE -> String
+showArcGraphEnhTikz bd (AGraphE ag@(AGraph ps _) coeffMap) = flip execState "" $ do
+  let normAG = normalize 1.0 ag
+  modify' (++ showArcGraphTikz bd normAG)
+  forM_ (Map.toList coeffMap) $ \kv -> do
+    let (comp,coeff) = kv
+        (x,y) = fromMaybe (0,0) $ findMostVrtx (\v w -> fst v < fst w) $ map (ps!!) comp
+    -- Draw label
+    modify' (++ (nodeCommand x y $ case coeff of {SLI -> "$1$"; SLX -> "$X$";}))
+
+showStateSumTikz :: Double -> FreeMod Int ArcGraphE -> String
+showStateSumTikz bd vect = flip execState "" $ do
+  modify' (++"\\[\\n")
+  forEachWithInterM drawAG (modify' (++"+")) vect
+  modify' (++"\\]\\n")
+  where
+    drawAG :: Int -> ArcGraphE -> State String ()
+    drawAG coeff agE = do
+      modify' (++ show coeff)
+      modify' (++"\\tikz[baseline=(x.base)]{%\\n")
+      modify' (++ showArcGraphEnhTikz bd agE)
+      modify' (++"}")
 
 typesetArcGraphTikz :: String -> String -> [ArcGraph] -> String
 typesetArcGraphTikz option cls ags = flip execState "" $ do
@@ -133,7 +159,9 @@ typesetArcGraphTikz option cls ags = flip execState "" $ do
   modify' (++texPreamble)
   modify' (++texBegin)
   forM_ ags $ \ag -> do
+    modify' (++tikzBegin)
     modify' (++showArcGraphTikz 0.15 ag)
+    modify' (++tikzEnd)
   modify' (++texEnd)
 
 docArcGraphTikz :: String -> String -> [ArcGraph] -> String
@@ -144,7 +172,9 @@ docArcGraphTikz option cls ags = flip execState "" $ do
   forM_ ags $ \ag -> do
     modify' (++"\n\\section{}\n")
     modify' (++"\\begin{center}\n")
+    modify' (++tikzBegin)
     modify' (++showArcGraphTikz 0.15 ag)
+    modify' (++tikzEnd)
     modify' (++"\\end{center}\n")
     forM_ [0..countCross ag] $ \i -> do
       modify' (++texHorizontalLine)
@@ -152,7 +182,9 @@ docArcGraphTikz option cls ags = flip execState "" $ do
       -- modify' (++texHorizontalLine)
       modify' (++"\\begin{center}\n")
       forM_ (listSmoothing [i] ag) $ \agsm -> do
+        modify' (++tikzBegin)
         modify' (++showArcGraphTikz 0.15 agsm)
+        modify' (++tikzEnd)
         modify' (++"\\hfill\n")
       modify' (++"\\end{center}\n")
   modify' (++texEnd)

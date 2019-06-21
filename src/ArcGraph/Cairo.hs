@@ -17,14 +17,21 @@ module ArcGraph.Cairo (
   ) where
 
 import Control.Monad
+import Control.Monad.ST
 
+import qualified Data.Map.Strict as Map
 import Data.Maybe
 import Data.List
+import Data.STRef
 
 import qualified Graphics.Rendering.Cairo as Cairo
 
+import Numeric.Algebra.FreeModule
+import Numeric.Algebra.Frobenius
+
 import ArcGraph
 import ArcGraph.Common
+import ArcGraph.EnhancedState
 
 drawVertex :: Double -> Double -> Double -> Double -> Vertex -> Cairo.Render ()
 drawVertex r g b rad (x,y) = do
@@ -96,3 +103,38 @@ drawArcGraph ag@(AGraph ps cs) mayrgb = do
     Just (r,g,b) -> drawArcGraphVrtx r g b ag
     Nothing -> return ()
 
+drawArcGraphEnh :: ArcGraphE -> Double -> Double -> Double -> Double -> Cairo.Render ()
+drawArcGraphEnh (AGraphE ag@(AGraph ps _) coeffMap) sz r g b = do
+  -- Draw arc graph
+  drawArcGraph ag Nothing
+  -- Draw labels in the enhanced state
+  Cairo.save
+  Cairo.setSourceRGB r g b
+  Cairo.setFontSize sz
+  forM_ (Map.toList coeffMap) $ \kv -> do
+    let (comp,coeff) = kv
+        (x,y) = fromMaybe (0,0) $ findMostVrtx (\v w -> fst v < fst w) $ map (ps!!) comp
+    -- Draw label
+    Cairo.moveTo x y
+    Cairo.showText $ case coeff of {SLI -> "1"; SLX -> "X";}
+  Cairo.restore
+
+drawStateSum :: FreeMod Int ArcGraphE -> Double -> Double -> Double -> Cairo.Render ()
+drawStateSum vect r g b = do
+  Cairo.save
+  Cairo.setFontSize 20
+  forEachWithInterM drawAG drawPlus vect
+  Cairo.restore
+  where
+    drawAG coeff agE@(AGraphE ag _) = do
+      Cairo.moveTo 0 0
+      Cairo.showText (show coeff)
+      Cairo.save
+      Cairo.moveTo 20 0
+      Cairo.scale 0 (-1)
+      drawArcGraphEnh (agE {state = normalize 80 ag}) 20 r g b
+      Cairo.restore
+      Cairo.translate 100 0
+    drawPlus = do
+      Cairo.showText "+"
+      Cairo.translate 20 0

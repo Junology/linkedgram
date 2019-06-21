@@ -134,8 +134,12 @@ showKhovanovDialog ag mayparent = do
       unless (L.null smth0 || L.null smth1) $ do
         -- Print the diff matrix
         putStrLn $ "diff " ++ show i
+        {-
         let (_,h,_) = smithNF $ matiDataToLA $ genMatrix differential smth0Enh smth1Enh
         print $ matiLAToData h
+        -}
+        let (dvec,_,_) = kerImOf $ matiDataToLA $ genMatrix differential smth0Enh smth1Enh
+        print $ vectiLAToData dvec
 
   -- Close the dialog when "Close" is pressed
   btnClose `on` buttonActivated $ do
