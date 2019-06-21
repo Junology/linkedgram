@@ -189,6 +189,8 @@ mapFM f = insertMapFM (const (Right f))
 -- Matrix representation --
 ---------------------------
 genMatrix :: (Num a, Ord c) => (b -> FreeMod a c) -> [b] -> [c] -> Matrix a
+genMatrix _ [] _ = Mat.fromList 0 0 []
+genMatrix _ _ [] = mat.fromList 0 0 []
 genMatrix f dom cod
   = let el i j = getCoeff (cod !! (i-1)) ((fmap f dom) !! (j-1))
     in Mat.matrix (length cod) (length dom) $ uncurry el

@@ -30,6 +30,8 @@ import ArcGraph.Common
 import ArcGraph.EnhancedState
 import ArcGraph.Cairo
 
+import qualified Numeric.LinearAlgebra as LA
+
 import Numeric.Algebra.FreeModule
 import Numeric.Algebra.Frobenius
 import Numeric.Algebra.IntMatrix
@@ -141,13 +143,26 @@ showKhovanovDialog ag mayparent = do
       smth <- mapM (listStoreGetValue smthList)
               =<< map head <$> iconViewGetSelectedItems agView
       MV.write baseMVec i $ L.concatMap (enhancedStatesL (qdeg -i)) smth
-    putStrLn $ "---- q-degree = " ++ show qdeg ++ " ----"
+    -- Compute kernels and images of differentials
+    cycleMV <- MV.replicate (MV.length listMVec) (V.empty)
+    bndryMV <- MV.replicate (MV.length listMVec) (V.empty)
+    diagcMV <- MV.replicate (MV.length listMVec) (V.empty)
     forM_ [1..(MV.length listMVec - 1)] $ \i -> do
       base0 <- MV.read baseMVec (i-1)
       base1 <- MV.read baseMVec i
       unless (L.null base0 || L.null base1) $ do
+        let (dvec,ker,im) = kerImOf $ matiDataToLA $ genMatrix differential base0 base1
+        MV.write cycleMV (i-1) $ V.fromList $ LA.toCols ker
+        MV.write bndryMV i $ V.fromList $ LA.toCols im
+        MV.write diagcMV i $ V.filter (/=1) $ vectiLAToData dvec
+    -- Print the result
+    putStrLn $ "---- q-degree = " ++ show qdeg ++ " ----"
+    forM_ [0..(MV.length listMVec - 1)] $ \i -> do
+      -- Compute the number of free summands
+      sumN <- (-) <$> (V.length <$> MV.read cycleMV i) <*> (V.length <$> MV.read bndryMV i)
+      diagc <- MV.read diagcMV i
         -- Print the diff matrix
-        putStrLn $ "diff " ++ show i
+        putStrLn $ "[coh.degree = " ++ show i ++ "]"
         {-
         let (_,h,_) = smithNF $ matiDataToLA $ genMatrix differential smth0Enh smth1Enh
         print $ matiLAToData h
