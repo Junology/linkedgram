@@ -37,7 +37,7 @@ import qualified Data.Matrix as Mat
 -- d: the diagonal entries of Smith normal form
 -- ker: basis for the kernel
 -- im: basis for the image
-kerImOf :: LA.Matrix LA.Z -> (LA.Vector LA.Z,LA.Matrix LA.Z,LA.Matrix LA.Z)
+kerImOf :: LA.Matrix LA.Z -> (LA.Vector LA.Z,[LA.Vector LA.Z],[LA.Vector LA.Z])
 kerImOf mt =
   let (ul,h,ur) = smithNF mt
       (ull,_,ulr) = smithNF ul
@@ -46,7 +46,7 @@ kerImOf mt =
       (_,kert) = hnfLLL (LA.tr' ker')
       im' = (ulr LA.<> ull LA.<> h) LA.¿ [0..rk-1]
       (_,imt) = hnfLLL (LA.tr' im')
-  in (LA.takeDiag dmt, LA.tr' kert, LA.tr' imt)
+  in (LA.takeDiag dmt, LA.toRows kert, LA.toRows imt)
 
 -------------------------
 -- Translation of data --

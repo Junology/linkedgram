@@ -141,7 +141,7 @@ sumFM = removeZero . sumFM'
 
 zipSum' :: (Foldable t, Applicative t, Num a, Ord b)
   => t a -> t b -> FreeMod a b
-zipSum' rs es = foldl' (@+%) zeroVec $ liftA2 (@*@%) rs es
+zipSum' rs es = foldl' (@+%) zeroVec $ zipWith (@*@%) (toList rs) (toList es)
 
 zipSum :: (Eq a, Foldable t, Applicative t, Num a, Ord b)
   => t a -> t b -> FreeMod a b
@@ -190,10 +190,13 @@ mapFM f = insertMapFM (const (Right f))
 ---------------------------
 genMatrix :: (Num a, Ord c) => (b -> FreeMod a c) -> [b] -> [c] -> Matrix a
 genMatrix _ [] _ = Mat.fromList 0 0 []
-genMatrix _ _ [] = mat.fromList 0 0 []
 genMatrix f dom cod
-  = let el i j = getCoeff (cod !! (i-1)) ((fmap f dom) !! (j-1))
-    in Mat.matrix (length cod) (length dom) $ uncurry el
+  = let domRk = length dom
+        codRk = length cod
+        el j i = if (i <= domRk && j <= codRk)
+                 then getCoeff (cod !! (j-1)) (f (dom !! (i-1)))
+                 else 0
+    in Mat.matrix codRk domRk $ uncurry el
 
 genMatrixAR :: (Num a, Ord c) => (b -> FreeMod a c) -> [b] -> Matrix a
 genMatrixAR f dom

@@ -10,6 +10,8 @@
 
 module ArcGraph.TikZ (
   showArcGraphTikz,
+  showStateSumTikz,
+  docKhovanovTikz,
   typesetArcGraphTikz,
   docArcGraphTikz
   ) where
@@ -36,7 +38,7 @@ texHeader option cls
   ++ option ++ "]{" ++ cls ++ "}\n"
 
 texPreamble :: String
-texPreamble = "\\usepackage{tikz}\n"
+texPreamble = "\\usepackage{amsmath,amssymb}\n\\usepackage{tikz}\n\\usepackage{breqn}\n"
 
 texBegin :: String
 texBegin = "\\begin{document}\n"
@@ -44,12 +46,15 @@ texBegin = "\\begin{document}\n"
 texEnd :: String
 texEnd = "\\end{document}\n"
 
+texParagraph :: String -> String
+texParagraph str = "\\paragraph{" ++ str ++ "}\n\\mbox\\\\\\leavevmode\n"
+
 texHorizontalLine :: String
 texHorizontalLine
-  = "\\noindent\\makebox[\\linewidth]{\\rule{\\paperwidth}{0.4pt}}\n"
+  = "\\leavevmode\n\\\\\n\\noindent\\makebox[\\linewidth]{\\rule{\\paperwidth}{0.4pt}}\n"
 
-tikzBegin :: String
-tikzBegin = "\\begin{tikzpicture}\n"
+tikzBegin :: Double -> String
+tikzBegin scale = "\\begin{tikzpicture}[scale=" ++ show scale ++ "]\n"
 
 tikzEnd :: String
 tikzEnd = "\\end{tikzpicture}\n"
@@ -123,7 +128,14 @@ showCrossTikz bd (Crs sega segb crst)
 
 showArcGraphTikz :: Double -> ArcGraph -> String
 showArcGraphTikz bd ag = flip execState "" $ do
-  let ag'@(AGraph ps cs) = slimCross $ normalize 1.0 ag
+  let (AGraph ps cs) = slimCross $ normalize 1.0 ag
+  for_ ps $ \path -> do
+    modify' (++ showArcPathTikz Nothing path)
+  modify' (++ concat (map (showCrossTikz bd) cs))
+
+showArcGraphTikzWithComp :: Double -> ArcGraph -> DiagramState -> String
+showArcGraphTikzWithComp bd ag st = flip execState "" $ do
+  let ag'@(AGraph ps cs) = smoothing st $ normalize 1.0 ag
   for_ (zip (components ag') (cycle $ map Just tikzColors)) $ \ipsc -> do
     let (ips,c) = ipsc
     for_ ips $ \i -> do
@@ -131,9 +143,9 @@ showArcGraphTikz bd ag = flip execState "" $ do
   modify' (++ concat (map (showCrossTikz bd) cs))
 
 showArcGraphEnhTikz :: Double -> ArcGraphE -> String
-showArcGraphEnhTikz bd (AGraphE ag@(AGraph ps _) coeffMap) = flip execState "" $ do
-  let normAG = normalize 1.0 ag
-  modify' (++ showArcGraphTikz bd normAG)
+showArcGraphEnhTikz bd (AGraphE ag st coeffMap) = flip execState "" $ do
+  let normAG@(AGraph ps _) = normalize 1.0 ag
+  modify' (++ showArcGraphTikzWithComp bd normAG st)
   forM_ (Map.toList coeffMap) $ \kv -> do
     let (comp,coeff) = kv
         (x,y) = fromMaybe (0,0) $ findMostVrtx (\v w -> fst v < fst w) $ map (ps!!) comp
@@ -142,16 +154,92 @@ showArcGraphEnhTikz bd (AGraphE ag@(AGraph ps _) coeffMap) = flip execState "" $
 
 showStateSumTikz :: Double -> FreeMod Int ArcGraphE -> String
 showStateSumTikz bd vect = flip execState "" $ do
-  modify' (++"\\[\\n")
+  modify' (++"\\begin{dmath*}\n")
   forEachWithInterM drawAG (modify' (++"+")) vect
-  modify' (++"\\]\\n")
+  modify' (++"\\end{dmath*}\n")
   where
     drawAG :: Int -> ArcGraphE -> State String ()
     drawAG coeff agE = do
       modify' (++ show coeff)
-      modify' (++"\\tikz[baseline=(x.base)]{%\\n")
+      modify' (++"\\tikz{%\n")
       modify' (++ showArcGraphEnhTikz bd agE)
-      modify' (++"}")
+      modify' (++"}\n")
+
+showAbGroupTeX :: Int -> [Int] -> String
+showAbGroupTeX freeRk torsions =
+  case torsions of
+    []{- no torsion -}
+      | freeRk > 0 -> freepart freeRk
+      | True       -> "0"
+    _ {- has torsions -}
+      | freeRk > 0 -> freepart freeRk ++ "\\oplus " ++ torpart torsions
+      | True       -> torpart torsions
+  where
+    freepart rk = "\\mathbb Z^{\\oplus " ++ show rk ++ "}"
+    torpart trs = intercalate "\\oplus " $ map (("\\mathbb Z/"++). show) trs
+
+showHomologyTableTeX :: Map.Map (Int,Int) KHData -> String
+showHomologyTableTeX khMap =
+  let mayRange = foldl' rangeFinder Nothing (Map.keys khMap)
+  in case mayRange of
+       Nothing -> ""
+       (Just (imin,imax,jmin,jmax)) -> flip execState "" $ do
+         modify' (++("\\begin{array}{r|" ++ replicate (jmax-jmin+1) 'c' ++ "}\n"))
+         modify' (++"i\\backslash j & ")
+         forM_ [jmin..jmax] $ \j -> do
+           modify'(++(show j ++ if j<jmax then "&" else "\\\\\\hline\n"))
+         forM_ [imin..imax] $ \i -> do
+           modify' (++(show i ++ "&"))
+           forM_ [jmin..jmax] $ \j -> do
+             case (khMap Map.!? (i,j)) of
+               Just khdata ->
+                 modify' (++ showAbGroupTeX (rank khdata) (tors khdata))
+               Nothing ->
+                 return ()
+             when (j < jmax) $ modify' (++"&")
+           when (i < imax) $ modify' (++"\\\\\n")
+         modify' (++ "\\end{array}")
+  where
+    rangeFinder Nothing (i,j) = Just (i,i,j,j)
+    rangeFinder (Just (imin,imax,jmin,jmax)) (i,j) =
+      let imin' = if i < imin then i else imin
+          imax' = if i > imax then i else imax
+          jmin' = if j < jmin then j else jmin
+          jmax' = if j > jmax then j else jmax
+      in Just (imin',imax',jmin',jmax')
+
+showKHDataTikz :: Int -> Int -> KHData -> String
+showKHDataTikz i j khData = flip execState "" $ do
+  modify' (++ texParagraph "Homology group")
+  modify' (++ "\\[\n")
+  modify' (++("\\overline{\\mathit{Kh}}^{" ++ show i ++ "," ++ show j ++ "}\n"))
+  modify' (++("\\cong" ++ showAbGroupTeX (rank khData) (tors khData)))
+  modify' (++ "\\]\n")
+  modify' (++ texParagraph "Generating cycles")
+  forM_ (cycleV khData) $ \cyc -> modify' (++ showStateSumTikz 0.15 cyc)
+  modify' (++ texParagraph "Killing boundaries")
+  forM_ (bndryV khData) $ \bnd -> modify' (++ showStateSumTikz 0.15 bnd)
+
+docKhovanovTikz :: ArcGraph -> String -> String -> Map.Map (Int,Int) KHData -> String
+docKhovanovTikz ag opts cls khMap = flip execState "" $ do
+  modify' (++ texHeader opts cls)
+  modify' (++ texPreamble)
+  modify' (++ texBegin)
+  modify' (++"\n\\section{}\n")
+  modify' (++"\\begin{center}\n")
+  modify' (++tikzBegin 2.0)
+  modify' (++showArcGraphTikz 0.15 ag)
+  modify' (++tikzEnd)
+  modify' (++"\\end{center}\n")
+  modify' (++"\\section*{Table of homology groups}\n")
+  modify' (++"\\[")
+  modify' (++showHomologyTableTeX khMap)
+  modify' (++"\\]")
+  forM_ (Map.keys khMap) $ \ind -> do
+    let (i,j) = ind
+    modify' (++texHorizontalLine)
+    modify' (++ showKHDataTikz i j (khMap Map.! (i,j)))
+  modify' (++ texEnd)
 
 typesetArcGraphTikz :: String -> String -> [ArcGraph] -> String
 typesetArcGraphTikz option cls ags = flip execState "" $ do
@@ -159,7 +247,7 @@ typesetArcGraphTikz option cls ags = flip execState "" $ do
   modify' (++texPreamble)
   modify' (++texBegin)
   forM_ ags $ \ag -> do
-    modify' (++tikzBegin)
+    modify' (++tikzBegin 1.0)
     modify' (++showArcGraphTikz 0.15 ag)
     modify' (++tikzEnd)
   modify' (++texEnd)
@@ -172,7 +260,7 @@ docArcGraphTikz option cls ags = flip execState "" $ do
   forM_ ags $ \ag -> do
     modify' (++"\n\\section{}\n")
     modify' (++"\\begin{center}\n")
-    modify' (++tikzBegin)
+    modify' (++tikzBegin 1.0)
     modify' (++showArcGraphTikz 0.15 ag)
     modify' (++tikzEnd)
     modify' (++"\\end{center}\n")
@@ -182,7 +270,7 @@ docArcGraphTikz option cls ags = flip execState "" $ do
       -- modify' (++texHorizontalLine)
       modify' (++"\\begin{center}\n")
       forM_ (listSmoothing [i] ag) $ \agsm -> do
-        modify' (++tikzBegin)
+        modify' (++tikzBegin 1.0)
         modify' (++showArcGraphTikz 0.15 agsm)
         modify' (++tikzEnd)
         modify' (++"\\hfill\n")

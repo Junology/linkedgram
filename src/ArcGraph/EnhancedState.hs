@@ -13,7 +13,6 @@
 
 module ArcGraph.EnhancedState where
 
-import Control.Applicative
 import Control.Monad
 import Control.Monad.ST
 
@@ -25,11 +24,17 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as MV
 import qualified Data.Map.Strict as Map
 
+import qualified Numeric.LinearAlgebra as LA
+
 import ArcGraph
 
 import Numeric.Algebra.FreeModule as FM
 import Numeric.Algebra.Frobenius as Frob
 import Numeric.Algebra.IntMatrix
+
+{-- for debug
+import Debug.Trace
+--}
 
 ---------------
 -- Utilities --
@@ -44,16 +49,22 @@ stepST cntRef= do
 -----------------------
 -- Unenhanced states --
 -----------------------
-type DiagramState = [Cross]
+type DiagramState = [Int]
 
 smoothing :: DiagramState -> ArcGraph -> ArcGraph
 smoothing st (AGraph ps cs)
-  = AGraph ps $ map (\c -> if elem c st then crsSetState Smooth1 c else crsSetState Smooth0 c) cs
+  = AGraph ps $ map mkCrs $ zip [0..] cs
+  where mkCrs (i,Crs sega segb _) = if i `elem` st
+                                    then Crs sega segb Smooth1
+                                    else Crs sega segb Smooth0
+
+listStates :: ArcGraph -> Int -> [DiagramState]
+listStates (AGraph _ cs) deg =
+  filter ((==deg) . length) $ L.subsequences [0..(length cs - 1)]
 
 listSmoothing :: [Int] -> ArcGraph -> [ArcGraph]
-listSmoothing degrees ag@(AGraph _ cs)
-  = let states = filter ((`elem` degrees) . length) $ L.subsequences cs
-    in map (flip smoothing ag) states
+listSmoothing degrees ag
+  = map (flip smoothing ag) $ concatMap (listStates ag) degrees
 
 localCross :: Cross -> (Segment,Segment)
 localCross (Crs sega segb Crossing) = (sega,segb)
@@ -78,7 +89,7 @@ mkConnection p edgeMV cntRef = do
     MV.modify edgeMV (\x -> (Just cnt,snd x)) j
 
 components :: ArcGraph -> [[Int]]
-components ag@(AGraph ps cs) = runST $ do
+components (AGraph ps cs) = runST $ do
   let n = length ps
   edgeMV <- MV.new n
   -- Initialize buffer
@@ -95,21 +106,22 @@ components ag@(AGraph ps cs) = runST $ do
   return $ (Map.elems $ Map.fromListWith (++) justcls) ++ nocls
 
 data ArcGraphE = AGraphE {
-  state :: ArcGraph,
+  arcGraph :: ArcGraph,
+  state :: DiagramState,
   enhLabel :: (Map.Map [Int] SL2B)
   } deriving (Eq,Show)
 
 -- | Lexicographical order on ArcGraphE
 instance Ord ArcGraphE where
-  compare (AGraphE ag coeff) (AGraphE ag' coeff')
-    = case compare ag ag' of
+  compare (AGraphE _ st coeff) (AGraphE _ st' coeff')
+    = case compare st st' of
         LT -> LT
         GT -> GT
         EQ -> compare coeff coeff'
 
-enhancements :: Int -> ArcGraph -> V.Vector (Map.Map [Int] SL2B)
-enhancements deg ag = runST $ do
-  let comps = components ag
+enhancements :: Int -> ArcGraph -> DiagramState -> V.Vector (Map.Map [Int] SL2B)
+enhancements deg ag st = runST $ do
+  let comps = components (smoothing st ag)
       deg' = deg + L.length comps
       subis = zip [0..] $ filter (\sub -> 2*L.length sub == deg') $ L.subsequences comps
   mapMV <- MV.unsafeNew (length subis) -- Do not need to initialize the memory
@@ -118,41 +130,95 @@ enhancements deg ag = runST $ do
     MV.write mapMV i $ L.foldl' (\xs y -> Map.insert y (if elem y sub then SLI else SLX) xs) Map.empty comps
   V.unsafeFreeze mapMV
 
-enhancedStates :: Int -> ArcGraph -> V.Vector ArcGraphE
-enhancedStates deg ag
-  = V.map (AGraphE ag) $ enhancements deg ag
+enhancedStates :: Int -> ArcGraph -> DiagramState -> V.Vector ArcGraphE
+enhancedStates deg ag st
+  = V.map (AGraphE ag st) $ enhancements deg ag st
 
-enhancedStatesL :: Int -> ArcGraph -> [ArcGraphE]
-enhancedStatesL deg ag
-  = V.foldr' (\x xs -> (AGraphE ag x):xs) [] $ enhancements deg ag
+enhancedStatesL :: Int -> ArcGraph -> DiagramState -> [ArcGraphE]
+enhancedStatesL deg ag st
+  = V.foldr' (\x xs -> (AGraphE ag st x):xs) [] $ enhancements deg ag st
 
 -- | Compute next states with sign in differential.
 -- On determining signs, we use the descending order on corssings.
-diffState :: ArcGraph -> V.Vector (Int,ArcGraph)
-diffState ag@(AGraph _ cs) = runST $ do
+diffState :: ArcGraph -> DiagramState -> V.Vector (Int,DiagramState)
+diffState (AGraph _ cs) st = runST $ do
   resVecRef <- newSTRef V.empty
   signRef <- newSTRef 1
   for_ [0..(length cs - 1)] $ \i -> do
-    case cs!!i of
-      (Crs _ _ Smooth0) -> do
+    if i `elem` st
+      then modifySTRef' signRef negate
+      else do
         sign <- readSTRef signRef
-        modifySTRef' resVecRef $ flip V.snoc (sign,setCrsState i Smooth1 ag)
-      (Crs _ _ Smooth1) -> do
-        modifySTRef' signRef (*(-1))
-      (Crs _ _ Crossing) -> do
-        return ()
+        modifySTRef' resVecRef $ flip V.snoc (sign, L.sort (i:st))
   readSTRef resVecRef
 
 hasIntersection :: Eq a => [a] -> [a] -> Bool
 hasIntersection x y = not $ L.null (x `L.intersect` y)
 
 differential :: ArcGraphE -> FreeMod Int ArcGraphE
-differential (AGraphE ag coeffMap) =
-  let dStVec = diffState ag
+differential (AGraphE ag st coeffMap) =
+  let dStVec = diffState ag st
   in FM.sumFM $ runST $ do
     imageMV <- MV.unsafeNew (V.length dStVec)
     for_ [0..(V.length dStVec -1)] $ \i -> do
-      let (sign,dAg) = (dStVec V.! i)
-          imageAg = AGraphE dAg FM.@$>% Map.fromList FM.@$>% Frob.tqftZ hasIntersection (Map.toList coeffMap) (components dAg)
+      let (sign,dSt) = (dStVec V.! i)
+          imageAg = AGraphE ag dSt FM.@$>% Map.fromList FM.@$>% Frob.tqftZ hasIntersection (Map.toList coeffMap) (components (smoothing dSt ag))
       MV.write imageMV i (sign FM.@*% imageAg)
     V.unsafeFreeze imageMV
+
+----------------------------------------------------------
+-- The computation of (unnormalized) Khovanov homology
+-----------------------------------------------------------
+-- | The type to carry the data of Khovanov homologies
+data KHData = KHData {
+  rank :: Int,
+  tors :: [Int],
+  cycleV :: [FreeMod Int ArcGraphE],
+  bndryV :: [FreeMod Int ArcGraphE] }
+
+-- | Compute Khovanov homology for given range of cohomological degrees and a given quantum-degree
+computeKhovanov :: ArcGraph -> [Int] -> Int -> [DiagramState] -> Map.Map (Int,Int) KHData
+computeKhovanov ag hdegs qdeg states =
+  let numCrs = countCross ag
+      hdegsNHD = filter isNhd [0..numCrs]
+        where isNhd i = elem i hdegs || elem (i+1) hdegs || elem (i-1) hdegs
+      slimAG = slimCross ag
+  in runST $ do
+    -- Define STRef to write the result
+    resultMapRef <- newSTRef (Map.empty)
+    -- Compute basis
+    baseMVec <- MV.replicate (numCrs + 2) []
+    forM_ [0..numCrs] $ \i -> do
+      -- Get selected states at coh.degree i
+      let statesi = filter ((==i). L.length) states
+      MV.write baseMVec i $ L.concatMap (enhancedStatesL (qdeg-i) slimAG) statesi
+    -- Compute kernels and images of differentials
+    cycleMV <- MV.replicate (numCrs+1) ([] :: [LA.Vector LA.Z])
+    bndryMV <- MV.replicate (numCrs+1) ([] :: [LA.Vector LA.Z])
+    diagcMV <- MV.replicate (numCrs+1) ([] :: [Int])
+    forM_ hdegsNHD $ \i -> do
+      base0 <- MV.read baseMVec i
+      base1 <- MV.read baseMVec (i+1)
+      if L.null base1
+        then MV.write cycleMV i $ LA.toColumns (LA.ident (L.length base0))
+        else unless (L.null base0) $ do
+          let diffMat = genMatrix differential base0 base1
+          let (dvec,ker,im) = kerImOf $ matiDataToLA diffMat
+          MV.write cycleMV i $ ker
+          MV.write bndryMV (i+1) $ im
+          MV.write diagcMV (i+1) $ map fromIntegral $ LA.toList dvec
+    -- Compute Homology at degree (i,qdeg)
+    forM_ hdegs $ \i -> do
+      when (i <= numCrs) $ do
+        base <- MV.read baseMVec i
+        cycleL <- MV.read cycleMV i
+        bndryL <- MV.read bndryMV i
+        let freeRk = (length cycleL) - (length bndryL)
+        tor <- L.filter (/=1) <$> MV.read diagcMV i
+        when (freeRk > 0 || not (L.null tor)) $ do
+          let cycs' = map (map fromIntegral . LA.toList) cycleL
+          let bnds' = map (map fromIntegral . LA.toList) bndryL
+          let (cycs'',bnds'') = (cycs' L.\\ bnds', bnds' L.\\ cycs')
+          modifySTRef' resultMapRef $ Map.insert (i,qdeg) $
+            KHData freeRk tor (map (flip zipSum base) cycs'') (map (flip zipSum base) bnds'')
+    readSTRef resultMapRef

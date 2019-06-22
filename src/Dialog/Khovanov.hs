@@ -11,13 +11,16 @@
 module Dialog.Khovanov where
 
 import Control.Monad
+import Control.Monad.ST
 
+import Data.Maybe
 import qualified Data.Text as T
 import Data.List as L
 import qualified Data.Map.Strict as Map
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as MV
 import Data.IORef
+import Data.STRef
 
 import System.Directory
 
@@ -29,6 +32,7 @@ import ArcGraph
 import ArcGraph.Common
 import ArcGraph.EnhancedState
 import ArcGraph.Cairo
+import ArcGraph.TikZ
 
 import qualified Numeric.LinearAlgebra as LA
 
@@ -36,46 +40,49 @@ import Numeric.Algebra.FreeModule
 import Numeric.Algebra.Frobenius
 import Numeric.Algebra.IntMatrix
 
+import Dialog
+
+{-- for debug
+import System.IO
+import Debug.Trace
+--}
+
 pictSize :: Num a => a
 pictSize = fromIntegral 80
 
 -- | Generate Pixbuf of smoothing diagrams
-genPixbufArcGraph :: ArcGraph -> Int -> IO ([ArcGraph], Map.Map [Cross] Pixbuf)
+genPixbufArcGraph :: ArcGraph -> Int -> IO ([DiagramState], Map.Map DiagramState Pixbuf)
 genPixbufArcGraph ag deg = do
-  let normAgs = listSmoothing [deg] $ normalize (pictSize / 2.0) ag
+  let states = listStates ag deg
+      normAg = normalize (pictSize / 2.0) ag
   pixMapRef <- newIORef Map.empty
   surface <- Cairo.createImageSurface Cairo.FormatRGB24 pictSize pictSize
-  forM_ normAgs $ \ag -> do
-    let (AGraph _ cs) = ag
+  forM_ states $ \cs -> do
     Cairo.renderWith surface $ do
       Cairo.setSourceRGB 1.0 1.0 1.0
       Cairo.paint
       Cairo.translate (pictSize / 2.0) (pictSize / 2.0)
       Cairo.scale 1.0 (-1.0)
       Cairo.setSourceRGB 1.0 0.0 0.0
-      drawArcGraph ag Nothing
+      drawArcGraph (smoothing cs normAg) Nothing
     pixbuf <- pixbufNewFromSurface surface 0 0 pictSize pictSize
     modifyIORef' pixMapRef $ Map.insert cs pixbuf
   Cairo.surfaceFinish surface
   pixMap <- readIORef pixMapRef
-  return (normAgs, pixMap)
+  return (states, pixMap)
 
 -- | Create IconView containing smoothings of a designated degree
-createArcGraphView :: ArcGraph -> Int -> IO (ListStore ArcGraph,IconView)
+createArcGraphView :: ArcGraph -> Int -> IO (ListStore DiagramState,IconView)
 createArcGraphView ag deg = do
   iconview <- iconViewNew
-  (normAgs,pixMap) <- genPixbufArcGraph ag deg
-  smoothList <- listStoreNew normAgs
+  (diagSt,pixMap) <- genPixbufArcGraph ag deg
+  smoothList <- listStoreNew diagSt
   let colAGPixbuf = makeColumnIdPixbuf 1
       colLabel = makeColumnIdString 2
-  treeModelSetColumn smoothList colAGPixbuf $ \ag ->
-    let (AGraph _ cs) = ag in pixMap Map.! cs
-  treeModelSetColumn smoothList colLabel $ \ag ->
-    let (AGraph _ cs) = ag
-        crsChar (Crs _ _ Smooth0) = '0'
-        crsChar (Crs _ _ Crossing) = '*'
-        crsChar (Crs _ _ Smooth1) = '1'
-    in map crsChar cs
+  treeModelSetColumn smoothList colAGPixbuf (pixMap Map.!)
+  treeModelSetColumn smoothList colLabel $ \st ->
+    let (AGraph _ cs') = ag
+    in map (\c -> if fst c `elem` st then '1' else '0') $ zip [0..] cs'
   set iconview [
     iconViewModel := Just smoothList,
     iconViewTextColumn := colLabel,
@@ -89,7 +96,7 @@ createArcGraphView ag deg = do
 showKhovanovDialog :: ArcGraph -> Maybe Window -> IO ()
 showKhovanovDialog ag mayparent = do
   -- Create Dialog and set the parent
-  let slimAG = slimCross ag
+  let slimAG = slimCross $ normalize 1.0 ag
   khovanovDlg <- dialogNew
   case mayparent of
     Just win -> set khovanovDlg [windowTransientFor := win]
@@ -125,50 +132,60 @@ showKhovanovDialog ag mayparent = do
   containerAdd scroll hboxSm
   -- Spin button to determine a quantum degree to compute
   btnCompute <- buttonNewWithLabel "Compute"
+  btnSummary <- buttonNewWithLabel "Export Summary"
   let maxQDeg = fromIntegral $ let (AGraph ps _) = slimAG in L.length ps
   spinQDeg <-spinButtonNewWithRange (-maxQDeg) maxQDeg 1
   hbtnbox <- hButtonBoxNew
   boxPackStart hbtnbox spinQDeg PackNatural 0
   boxPackStart hbtnbox btnCompute PackNatural 0
+  boxPackStart hbtnbox btnSummary PackNatural 0
   boxPackStart vbox hbtnbox PackNatural 0
   widgetShowAll khovanovDlg
 
   -- Compute (unnormalized) Khovanov homology
   btnCompute `on` buttonActivated $ do
+    -- Get q-degree
     qdeg <- spinButtonGetValueAsInt spinQDeg
-    baseMVec <- MV.unsafeNew (MV.length listMVec)
-    forM_ [0..(MV.length listMVec - 1)] $ \i -> do
-      -- Get selected states at coh.degree i
-      (smthList,agView) <- MV.read listMVec i
-      smth <- mapM (listStoreGetValue smthList)
-              =<< map head <$> iconViewGetSelectedItems agView
-      MV.write baseMVec i $ L.concatMap (enhancedStatesL (qdeg -i)) smth
-    -- Compute kernels and images of differentials
-    cycleMV <- MV.replicate (MV.length listMVec) (V.empty)
-    bndryMV <- MV.replicate (MV.length listMVec) (V.empty)
-    diagcMV <- MV.replicate (MV.length listMVec) (V.empty)
-    forM_ [1..(MV.length listMVec - 1)] $ \i -> do
-      base0 <- MV.read baseMVec (i-1)
-      base1 <- MV.read baseMVec i
-      unless (L.null base0 || L.null base1) $ do
-        let (dvec,ker,im) = kerImOf $ matiDataToLA $ genMatrix differential base0 base1
-        MV.write cycleMV (i-1) $ V.fromList $ LA.toCols ker
-        MV.write bndryMV i $ V.fromList $ LA.toCols im
-        MV.write diagcMV i $ V.filter (/=1) $ vectiLAToData dvec
+    -- Get selected states
+    agViewListV <- V.unsafeFreeze listMVec
+    states <- fmap (V.foldl' (++) []) $ V.forM agViewListV $ \agvlv -> do
+      let (smthList,agView) = agvlv
+      mapM (listStoreGetValue smthList)
+        =<< (map head <$> iconViewGetSelectedItems agView :: IO [Int])
+
+    -- Execute the computation
+    let khResult = computeKhovanov slimAG [0..(MV.length listMVec)] qdeg states
     -- Print the result
-    putStrLn $ "---- q-degree = " ++ show qdeg ++ " ----"
-    forM_ [0..(MV.length listMVec - 1)] $ \i -> do
-      -- Compute the number of free summands
-      sumN <- (-) <$> (V.length <$> MV.read cycleMV i) <*> (V.length <$> MV.read bndryMV i)
-      diagc <- MV.read diagcMV i
-        -- Print the diff matrix
-        putStrLn $ "[coh.degree = " ++ show i ++ "]"
-        {-
-        let (_,h,_) = smithNF $ matiDataToLA $ genMatrix differential smth0Enh smth1Enh
-        print $ matiLAToData h
-        -}
-        let (dvec,_,_) = kerImOf $ matiDataToLA $ genMatrix differential base0 base1
-        print $ vectiLAToData dvec
+    forM_ (Map.toList khResult) $ \khi -> do
+      let ((i,_),KHData freeRk torsion cycleL bndryL) = khi
+      let prettyFree = "Z^{" ++ show freeRk ++ "}"
+          prettyTor = L.intercalate " (+) " $ map (\x -> "Z/" ++ show x) torsion
+      let cohPretty = case (freeRk,torsion) of
+                        (0,[]) -> "0"
+                        (0,rs) -> prettyTor
+                        (n,[]) -> prettyFree
+                        (n,rs) -> prettyTor ++ " (+) " ++ prettyFree
+      unless (cohPretty == "0") $ do
+        putStrLn $ "Kh^{" ++ show i ++ "," ++ show qdeg ++ "} = " ++ cohPretty
+
+  btnSummary `on` buttonActivated $ do
+    -- Get selected states
+    agViewListV <- V.unsafeFreeze listMVec
+    states <- fmap (V.foldl' (++) []) $ V.forM agViewListV $ \agvlv -> do
+      let (smthList,agView) = agvlv
+      mapM (listStoreGetValue smthList)
+        =<< (map head <$> iconViewGetSelectedItems agView :: IO [Int])
+    -- Execute computation on all quantum-degrees
+    -- TODO: should be parallelized?
+    khMapRef <- newIORef (Map.empty)
+    forM_ [-(round maxQDeg)..(round maxQDeg)] $ \j ->
+      let khMapj = computeKhovanov slimAG [0..(MV.length listMVec)] j states
+      in modifyIORef' khMapRef $ Map.union khMapj
+    khMap <- readIORef khMapRef
+    -- Write to the file
+    mayfname <- showSaveDialog mayparent ""
+    when (isJust mayfname) $ do
+      writeFile (fromJust mayfname) (docKhovanovTikz ag "pdftex,a4paper" "scrartcl" khMap)
 
   -- Close the dialog when "Close" is pressed
   btnClose `on` buttonActivated $ do

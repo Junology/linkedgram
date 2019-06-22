@@ -13,16 +13,15 @@ module ArcGraph.Cairo (
   drawArcPath,
   drawArcVertex,
   drawArcGraph,
-  drawArcGraphVrtx
+  drawArcGraphVrtx,
+  drawStateSum
   ) where
 
 import Control.Monad
-import Control.Monad.ST
 
 import qualified Data.Map.Strict as Map
 import Data.Maybe
 import Data.List
-import Data.STRef
 
 import qualified Graphics.Rendering.Cairo as Cairo
 
@@ -104,9 +103,9 @@ drawArcGraph ag@(AGraph ps cs) mayrgb = do
     Nothing -> return ()
 
 drawArcGraphEnh :: ArcGraphE -> Double -> Double -> Double -> Double -> Cairo.Render ()
-drawArcGraphEnh (AGraphE ag@(AGraph ps _) coeffMap) sz r g b = do
+drawArcGraphEnh (AGraphE ag@(AGraph ps _) st coeffMap) sz r g b = do
   -- Draw arc graph
-  drawArcGraph ag Nothing
+  drawArcGraph (smoothing st ag) Nothing
   -- Draw labels in the enhanced state
   Cairo.save
   Cairo.setSourceRGB r g b
@@ -126,13 +125,13 @@ drawStateSum vect r g b = do
   forEachWithInterM drawAG drawPlus vect
   Cairo.restore
   where
-    drawAG coeff agE@(AGraphE ag _) = do
+    drawAG coeff agE@(AGraphE ag _ _) = do
       Cairo.moveTo 0 0
       Cairo.showText (show coeff)
       Cairo.save
       Cairo.moveTo 20 0
       Cairo.scale 0 (-1)
-      drawArcGraphEnh (agE {state = normalize 80 ag}) 20 r g b
+      drawArcGraphEnh (agE {arcGraph = normalize 80 ag}) 20 r g b
       Cairo.restore
       Cairo.translate 100 0
     drawPlus = do
