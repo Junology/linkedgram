@@ -20,7 +20,8 @@ import Data.STRef
 import Numeric.LinearAlgebra as LA
 import Numeric.LinearAlgebra.Devel
 
-import Numeric.Algebra.IntMatrix.HNFLLL (hnfLLLST)
+--import Numeric.Algebra.IntMatrix.HNFLLL (hnfLLLST)
+import Numeric.Algebra.IntMatrix.HermiteNFLLL (hermiteNFST)
 
 -- | Find off-diagonal entries and calculate min of min{row,col} among them
 findDiagSz :: LA.Matrix LA.Z -> Maybe Int
@@ -41,9 +42,11 @@ preSmithNFST stMatUL stMatA stMatURt = do
     stMatULex <- thawMatrix =<< extractMatrix stMatUL (FromRow diagSz) AllCols
     stMatURtex <- thawMatrix =<< extractMatrix stMatURt (FromRow diagSz) AllCols
     -- Compute the Hermite normal forms of the extracted submatrix and of the transpose of the result.
-    hnfLLLST stMatULex stMatAex
+    --hnfLLLST stMatULex stMatAex
+    hermiteNFST stMatULex stMatAex
     stMatAext <- thawMatrix =<< (LA.tr' <$> freezeMatrix stMatAex)
-    hnfLLLST stMatURtex stMatAext
+    --hnfLLLST stMatURtex stMatAext
+    hermiteNFST stMatURtex stMatAext
     -- Write out the result
     setMatrix stMatA diagSz diagSz =<< (LA.tr' <$> freezeMatrix stMatAext)
     setMatrix stMatUL diagSz 0 =<< freezeMatrix stMatULex

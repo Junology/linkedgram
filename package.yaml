@@ -40,3 +40,7 @@ executables:
     - -DPROJECT_COPYRIGHT_YEAR="2019"
     - -DPROJECT_LICENSE="BSD3"
     - -DPROJECT_HOMEPAGE="https://github.com/Junology/linkedgram#readme"
+    c-sources:
+    - src/Numeric/Algebra/IntMatrix/HermiteNFLLL.c
+    cc-options: -O3 -fopenmp -march=native
+    ld-options: -O3 -lomp -lm
