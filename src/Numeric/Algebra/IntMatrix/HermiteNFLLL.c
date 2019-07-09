@@ -19,6 +19,14 @@
 #include <stdio.h>
 // */
 
+/* The type used for huge integers */
+/* AFAIK, this macro is defined at least in GCC and CLang. */
+#ifdef __SIZEOF_INT128__
+typedef __int128 hugeint_t;
+#else
+typedef intmax_t hugeint_t;
+#endif
+
 /*
  * These macros are copied from
  *    https://github.com/haskell-numerics/hmatrix/blob/master/examples/devel/example/functions.c
@@ -32,9 +40,7 @@
 #define LLL_DELTA 0.75
 
 #define DECLARE_MATRIX_TYPE(T) struct matrix_##T {T *p; size_t r, c, Xr, Xc;}
-#define DECLARE_ECHELONSQ_TYPE(Q,T) struct echelon_##Q_##T {Q T *p; size_t sz;}
 #define MATRIX_TYPE(T) struct matrix_##T
-#define ECHELONSQ_TYPE(Q,T) struct echelon_##Q_##T
 
 #define MATRIX_AT(m,i,j) ((m).p[(i)*(m).Xr + (j)*(m).Xc])
 #define MATRIX_UDAT(m,i,j) ((m).p[((m).r-i-1)*(m).Xr + (j)*(m).Xc])
@@ -47,11 +53,17 @@
  * Global variables to share the process among functions
  */
 DECLARE_MATRIX_TYPE(int64_t);
-DECLARE_ECHELONSQ_TYPE(long, double);
 
-MATRIX_TYPE(int64_t) g_m;
-MATRIX_TYPE(int64_t) g_u;
-ECHELONSQ_TYPE(long, double) g_lambda;
+struct echelonsq_ld {
+    long double * p;
+    size_t sz;
+};
+
+struct hermite_data {
+    MATRIX_TYPE(int64_t) m;
+    MATRIX_TYPE(int64_t) u;
+    struct echelonsq_ld lambda;
+};
 
 /*!************************************
  * \section utils Utility functions
@@ -85,7 +97,6 @@ void scalar_row(size_t i, int64_t s, MATRIX_TYPE(int64_t) * restrict mat)
 {
     #pragma omp parallel for
     for (size_t j = 0; j < mat->c; ++j)
-        #pragma omp atomic
         MATRIX_UDAT(*mat, i, j) *= s;
 }
 
@@ -94,9 +105,12 @@ inline
 void axpy_rows(int64_t s, size_t i_src, size_t i_dest, MATRIX_TYPE(int64_t) * restrict mat )
 {
     #pragma omp parallel for
-    for (size_t j = 0; j < mat->c; ++j)
-        #pragma omp atomic
-        MATRIX_UDAT(*mat, i_dest, j) += s * MATRIX_UDAT(*mat, i_src, j);
+    for (size_t j = 0; j < mat->c; ++j) {
+        hugeint_t aux = MATRIX_UDAT(*mat, i_src,j);
+        aux *= s;
+        aux += MATRIX_UDAT(*mat, i_dest, j);
+        MATRIX_UDAT(*mat, i_dest, j) = aux;
+    }
 }
 
 
@@ -107,15 +121,15 @@ void axpy_rows(int64_t s, size_t i_src, size_t i_dest, MATRIX_TYPE(int64_t) * re
 
 /*!
  * "Swap" operation in the algorithm.
- * \pre 1 <= k < min(g_m.r, g_u.r)
+ * \pre 1 <= k < min(data->m.r, data->u.r)
  */
 inline
-void swap(size_t k)
+void swap(struct hermite_data * restrict data, size_t k)
 {
-    swap_rows(k, k-1, &g_m);
-    swap_rows(k, k-1, &g_u);
+    swap_rows(k, k-1, &(data->m));
+    swap_rows(k, k-1, &(data->u));
 
-    long double * restrict lambda = g_lambda.p;
+    long double * restrict lambda = data->lambda.p;
 
     /* update lambda */
     #pragma omp parallel for
@@ -126,16 +140,13 @@ void swap(size_t k)
     }
 
     #pragma omp parallel for
-    for (size_t i = k+2; i < g_lambda.sz - 1; ++i) {
-        long double aux =
-            ( lambda[ ECHEL_I(i,k) ] * lambda[ ECHEL_I(k+1,k) ]
-              + lambda[ ECHEL_I(i,k+1) ] * lambda[ ECHEL_I(k-1,k-1) ] )
-            / lambda[ ECHEL_I(k,k) ];
-        lambda[ ECHEL_I(i,k+1) ] =
-            ( lambda[ ECHEL_I(i,k) ] * lambda[ ECHEL_I(k+1,k+1) ]
-              - lambda[ ECHEL_I(i,k+1) ] * lambda[ ECHEL_I(k+1,k) ] )
-            / lambda[ ECHEL_I(k,k) ];
-        lambda[ ECHEL_I(i,k) ] = aux;
+    for (size_t i = k+2; i < data->lambda.sz - 1; ++i) {
+        long double aux1
+            = lambda[ ECHEL_I(i,k) ] / lambda[ ECHEL_I(k,k) ];
+        long double aux2
+            = lambda[ ECHEL_I(i,k+1) ] / lambda[ ECHEL_I(k,k) ];
+        lambda[ ECHEL_I(i,k) ] = aux1 * lambda[ ECHEL_I(k+1,k) ] + aux2 * lambda[ ECHEL_I(k-1,k-1) ];
+        lambda[ ECHEL_I(i,k+1) ] = aux1 * lambda[ ECHEL_I(k+1,k+1) ] - aux2 * lambda[ ECHEL_I(k+1,k) ];
     }
 
     lambda[ ECHEL_I(k,k) ] =
@@ -148,35 +159,31 @@ void swap(size_t k)
  * "Minus" operation in the algorithm.
  */
 inline
-void negate(size_t k)
+void negate(struct hermite_data * restrict data, size_t k)
 {
-    long double * restrict lambda = g_lambda.p;
-
     /* Negate k-th rows */
-    scalar_row(k, -1, &g_m);
-    scalar_row(k, -1, &g_u);
+    scalar_row(k, -1, &(data->m));
+    scalar_row(k, -1, &(data->u));
+
+    long double * restrict lambda = data->lambda.p;
 
     /* update lambda */
     #pragma omp parallel for
     for (size_t s=0; s <= k; ++s)
-        #pragma omp atomic
         lambda[ ECHEL_I(k+1,s) ] *= -1.0;
 
     #pragma omp parallel for
-    for (size_t r=k+2; r < g_lambda.sz; ++r)
-        #pragma omp atomic
+    for (size_t r=k+2; r < data->lambda.sz; ++r)
         lambda[ ECHEL_I(r,k+1) ] *= -1.0;
 }
 
 /*!
  * Check if "Swap" is required.
- * \pre k >= 1
+ * \pre k >= 1 && k <= lambda.sz
  */
 inline
-int should_swap(size_t k)
+int should_swap(long double * restrict lambda, size_t k)
 {
-    long double * restrict lambda = g_lambda.p;
-
     return ( lambda[ ECHEL_I(k-1,k-1) ] * lambda[ ECHEL_I(k+1,k+1) ]
              + lambda[ ECHEL_I(k+1,k) ] * lambda[ ECHEL_I(k+1,k) ] )
         < LLL_DELTA * lambda[ ECHEL_I(k,k) ] * lambda[ ECHEL_I(k,k) ];
@@ -188,26 +195,26 @@ int should_swap(size_t k)
  * \return flag || (whether "Swap" is required or not).
  */
 inline
-int reduce(size_t k, size_t i, int flag)
+int reduce(struct hermite_data * restrict data, size_t k, size_t i, int flag)
 {
     /* The indices of the first non-zero entry of the k-th and i-th row vectors */
     size_t col1, col2;
 
     /* Find the first non-zero entry of the i-th row vector. */
-    for (col1 = 0; col1 < g_m.c; ++col1)
-        if (MATRIX_UDAT(g_m, i, col1)) {
+    for (col1 = 0; col1 < data->m.c; ++col1)
+        if (MATRIX_UDAT(data->m, i, col1)) {
             /* if the value is negative, negate it. */
-            if ( MATRIX_UDAT(g_m, i, col1) < 0 )
-                negate(i);
+            if ( MATRIX_UDAT(data->m, i, col1) < 0 )
+                negate(data, i);
             break;
         }
 
     /* Find the first non-zero entry of the k-th row vector. */
-    for (col2 = 0; col2 < g_m.c; ++col2)
-        if (MATRIX_UDAT(g_m, k, col2)) {
+    for (col2 = 0; col2 < data->m.c; ++col2)
+        if (MATRIX_UDAT(data->m, k, col2)) {
             /* if the value is negative, negate it. */
-            if ( MATRIX_UDAT(g_m, k, col2) < 0 )
-                negate(k);
+            if ( MATRIX_UDAT(data->m, k, col2) < 0 )
+                negate(data, k);
             break;
         }
 
@@ -215,34 +222,35 @@ int reduce(size_t k, size_t i, int flag)
     int64_t q;
 
     /* Compute the scalar factor */
-    if (col1 < g_m.c) {
-        q = floor_div(MATRIX_UDAT(g_m, k, col1), MATRIX_UDAT(g_m, i, col1));
+    if (col1 < data->m.c) {
+        q = - floor_div(MATRIX_UDAT(data->m, k, col1), MATRIX_UDAT(data->m, i, col1));
 
         /* For debug
-        fprintf(stderr, "A[%zu][%zu]=%"PRId64"\n", i, col1, MATRIX_UDAT(g_m, i, col1));
-        fprintf(stderr, "A[%zu][%zu]=%"PRId64"\n", k, col1, MATRIX_UDAT(g_m, k, col1));
+        fprintf(stderr, "A[%zu][%zu]=%"PRId64"\n", i, col1, MATRIX_UDAT(data->m, i, col1));
+        fprintf(stderr, "A[%zu][%zu]=%"PRId64"\n", k, col1, MATRIX_UDAT(data->m, k, col1));
         fprintf(stderr, "q=%"PRId64"\n", q);
         // */
     }
-    else if (2.0*fabs( g_lambda.p[ ECHEL_I(k,i) ] ) > g_lambda.p[ ECHEL_I(i,i) ])
-        q = (int64_t) round( g_lambda.p[ ECHEL_I(k,i) ] / g_lambda.p[ ECHEL_I(i,i) ] );
+    else if (2.0*fabs( data->lambda.p[ ECHEL_I(k,i) ] ) > data->lambda.p[ ECHEL_I(i,i) ])
+        q = - (int64_t) round( data->lambda.p[ ECHEL_I(k,i) ] / data->lambda.p[ ECHEL_I(i,i) ] );
     else
         q = 0;
 
     /* Reduce the k-th row vector by the i-th one. */
     if (q != 0) {
-        axpy_rows(-q, i, k, &g_m);
-        axpy_rows(-q, i, k, &g_u);
+        axpy_rows(q, i, k, &(data->m));
+        axpy_rows(q, i, k, &(data->u));
+
+        long double * restrict lambda = data->lambda.p;
 
         /* Update lambda */
         #pragma omp parallel for
         for(size_t j = 0; j < i; ++j)
-            #pragma omp atomic
-            g_lambda.p[ ECHEL_I(k,j) ] -= q * g_lambda.p[ ECHEL_I(i,j) ];
+            lambda[ ECHEL_I(k,j) ] += q * lambda[ ECHEL_I(i,j) ];
     }
 
-    return flag || (col1 < g_m.c && col1 <= col2)
-        || (col1 == g_m.c && col1 == col2 && should_swap(k));
+    return flag || (col1 < data->m.c && col1 <= col2)
+        || (col1 == data->m.c && col1 == col2 && should_swap(data->lambda.p, k));
 }
 
 /*!
@@ -250,7 +258,7 @@ int reduce(size_t k, size_t i, int flag)
  * The same operations are executed on the other matrix, so one can get the transformation matrix by passing the identity matrix.
  * \pre the two matrices have to have the same number of rows.
  */
-int c_hermiteNFUD_LLL(MAT(int64_t,u), MAT(int64_t,m))
+int c_hermiteNF_LLL(MAT(int64_t,u), MAT(int64_t,m))
 {
     long double *lambda = malloc(sizeof(long double) * (mr+1)*(mr+2)/2);
     size_t cur = 1;
@@ -260,21 +268,11 @@ int c_hermiteNFUD_LLL(MAT(int64_t,u), MAT(int64_t,m))
         for (size_t j = 0; j <= i; ++j)
             lambda[ ECHEL_I(i,i) ] = (long double) (i == j);
 
-    /* Initialize the global data */
-    g_m.p = mp;
-    g_m.r = mr;
-    g_m.c = mc;
-    g_m.Xr = mXr;
-    g_m.Xc = mXc;
-
-    g_u.p = up;
-    g_u.r = ur;
-    g_u.c = uc;
-    g_u.Xr = uXr;
-    g_u.Xc = uXc;
-
-    g_lambda.p = lambda;
-    g_lambda.sz = mr+1;
+    struct hermite_data data = {
+        {mp, mr, mc, mXr, mXc},
+        {up, ur, uc, uXr, uXc},
+        {lambda, mr+1}
+    };
 
     /* Debug
     for (size_t i = 0; i < ur*uc; ++i)
@@ -283,13 +281,13 @@ int c_hermiteNFUD_LLL(MAT(int64_t,u), MAT(int64_t,m))
 
     /* Begin the algorithm. */
     while (cur < mr) {
-        if ( reduce(cur, cur-1, 0) ) {
-            swap(cur);
+        if ( reduce(&data, cur, cur-1, 0) ) {
+            swap(&data, cur);
             if (cur > 1) --cur;
         }
         else {
             for (size_t i = 2; i <= cur; ++i)
-                reduce(cur, cur - i, 1);
+                reduce(&data, cur, cur - i, 1);
             ++cur;
         }
     }

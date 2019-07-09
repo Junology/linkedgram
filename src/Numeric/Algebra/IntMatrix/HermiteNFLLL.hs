@@ -39,7 +39,7 @@ type Ok = IO CInt
 
 --------------------------------------------------------------
 
-foreign import ccall unsafe "c_hermiteNFUD_LLL" cHermiteNF :: Z ::> Z ::> Ok
+foreign import ccall unsafe "c_hermiteNF_LLL" cHermiteNF :: Z ::> Z ::> Ok
 
 hermiteNFST :: STMatrix s Z -> STMatrix s Z -> ST s ()
 hermiteNFST stU stH = do
