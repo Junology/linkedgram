@@ -16,7 +16,6 @@ module Numeric.Algebra.FreeModule where
 
 import GHC.Generics
 
-import Control.Applicative
 import Control.DeepSeq
 
 import qualified Data.List as L
@@ -30,9 +29,9 @@ import qualified Data.Matrix as Mat
 
 import Data.Foldable
 
-----------------
--- Data types --
-----------------
+------------------
+-- * Data types --
+------------------
 newtype FreeMod a b = FMod (Map b a)
   deriving (Eq, Generic)
 
@@ -47,9 +46,9 @@ instance (Show a, Show b) => Show (FreeMod a b) where
 
 instance (NFData a, NFData b) => NFData (FreeMod a b)
 
-------------------------------
--- Miscellaneous operations --
-------------------------------
+--------------------------------
+-- * Miscellaneous operations --
+--------------------------------
 getCoeff :: (Num a, Ord b) => b -> FreeMod a b -> a
 getCoeff x (FMod mp) = M.fromMaybe 0 (Map.lookup x mp)
 
@@ -63,9 +62,9 @@ forEachWithInterM :: Monad m => (a -> b -> m ()) -> m () -> FreeMod a b -> m ()
 forEachWithInterM f g (FMod mp) =
   forM_ (L.intersperse Nothing (map Just (Map.toList mp))) $ maybe g (uncurry (flip f))
 
----------------------------------
--- Basic Arithmetic operations --
----------------------------------
+-----------------------------------
+-- * Basic Arithmetic operations --
+-----------------------------------
 infixr 7 @*@
 infixr 7 @*@%
 infixr 7 @*
@@ -91,11 +90,12 @@ zeroVec = FMod Map.empty
 (@+%) :: (Num a, Ord b) => FreeMod a b -> FreeMod a b -> FreeMod a b
 (@+%) (FMod mp) (FMod mq) = FMod $ Map.unionWith (+) mp mq
 
+(@+) :: (Eq a, Num a, Ord b) => FreeMod a b -> FreeMod a b -> FreeMod a b
 (@+) x y = removeZero (x @+% y)
 
----------------------------
--- Monad-like operations --
----------------------------
+------------------------
+-- * Monad operations --
+------------------------
 infixr 1 @=<<
 infixr 1 @=<<%
 
@@ -106,10 +106,18 @@ infixr 1 @=<<%
   where
     bin x b r = x @+% r@*%f b
 
+(@>>=%) :: (Eq a, Num a, Ord b, Ord c)
+  => FreeMod a b -> (b -> FreeMod a c) -> FreeMod a c
+(@>>=%) = flip (@=<<%)
+
 (@=<<) :: (Eq a, Num a, Ord b, Ord c)
   => (b -> FreeMod a c) -> FreeMod a b -> FreeMod a c
 (@=<<) f fmp
   = removeZero $ f @=<<% fmp
+
+(@>>=) :: (Eq a, Num a, Ord b, Ord c)
+  => FreeMod a b -> (b -> FreeMod a c) -> FreeMod a c
+(@>>=) = flip (@=<<)
 
 infixr 1 @>=>
 infixr 1 @>=>%
@@ -133,9 +141,9 @@ infixr 1 @$>%
   => (b -> c) -> FreeMod a b -> FreeMod a c
 (@$>) f = removeZero . (f@$>%)
 
------------------------
--- Tensor operations --
------------------------
+-------------------------
+-- * Tensor operations --
+-------------------------
 sumFM' :: (Num a, Ord b, Foldable t) => t (FreeMod a b) -> FreeMod a b
 sumFM' = foldl' (@+%) zeroVec
 
@@ -160,15 +168,6 @@ tensorWith f (FMod mp) y
 tensorFM :: (Eq a, Num a, Ord b, Foldable t) => t (FreeMod a b) -> FreeMod a [b]
 tensorFM = foldr' (tensorWith (:)) (1@*@%[])
 
-headConsMapFM :: (Eq a, Num a, Ord b)
-  => (b -> FreeMod a [b]) -> FreeMod a [b] -> FreeMod a [b]
-headConsMapFM f (FMod mp)
-  = removeZero $ Map.foldlWithKey bin zeroVec mp
-  where
-    bin x [] r = x @+% r@*@%[]
-    bin x (b:bs) r
-      = x @+% r@*%( (++bs) @$> f b)
-
 tensorMapFM :: (Eq a, Num a, Ord b, Ord c)
   => [b -> FreeMod a c] -> FreeMod a [b] -> FreeMod a [c]
 tensorMapFM fs = (@=<<) (tensorFM . zipWith ($) fs)
@@ -192,9 +191,9 @@ mapFM :: (Eq a, Num a, Ord b, Ord c)
   => (b -> FreeMod a c) -> FreeMod a [b] -> FreeMod a [c]
 mapFM f = insertMapFM (const (Right f))
 
----------------------------
--- Matrix representation --
----------------------------
+-----------------------------
+-- * Matrix representation --
+-----------------------------
 genMatrix :: (Num a, Ord c) => (b -> FreeMod a c) -> [b] -> [c] -> Matrix a
 genMatrix _ [] _ = Mat.fromList 0 0 []
 genMatrix f dom cod

@@ -17,6 +17,8 @@ module Numeric.Algebra.Frobenius where
 
 import GHC.Generics
 
+import Control.Applicative
+
 import Control.Parallel
 import Control.Parallel.Strategies
 
@@ -58,16 +60,14 @@ class Ord b => BFrobeniusI b where
   -- Default implementations
   mult x y = foldMult [x,y]
   unit = foldMult []
-  diag x = (\x -> (head x, head (tail x))) @$> foldDiag 2 x
+  diag x = (\y -> (head y, head (tail y))) @$> foldDiag 2 x
   counit = getCoeff [] . foldDiag 0
   foldMult = foldl (\x y -> flip mult y @=<< x) unit
   foldDiag n x
-    | n < 0  = undefined
-    | n == 0 = counit x @*@[]
-    | n == 1 = 1@*@[x]
-    | n > 1  = headConsMapFM diagL $ foldDiag (n-1) x
-    where
-      diagL = ((\x->[fst x,snd x]) @$>) . diag
+    | n < 0      = undefined
+    | n == 0     = counit x @*@ empty
+    | n == 1     = 1@*@ pure x
+    | otherwise  = diag x @>>= \y -> tensorWith (:) (1@*@% fst y) (foldDiag (n-1) (snd y))
 
 -- | Frobenius algebra structure over integers
 instance BFrobeniusI SL2B where
@@ -79,14 +79,14 @@ instance BFrobeniusI SL2B where
   foldMult = maybe zeroVec (1@*@) . L.foldl' mult' (Just SLI)
     where
       mult' mel SLI = mel
+      mult' Nothing _ = Nothing
       mult' (Just SLI) SLX = Just SLX
       mult' (Just SLX) SLX = Nothing
 
   diag SLI = 1@*@(SLI,SLX) @+ 1@*@(SLX,SLI)
   diag SLX = 1@*@(SLX,SLX)
 
-  foldDiag 0 SLI = zeroVec
-  foldDiag n SLI = sumFM' $ flip map [0..n] $ \i ->
+  foldDiag n SLI = sumFM' $ flip map [0..(n-1)] $ \i ->
     let (xs,ys) = L.splitAt i (replicate (n-1) SLX)
     in 1@*@% (xs ++ (SLI:ys))
   foldDiag n SLX = 1@*@% L.replicate n SLX
