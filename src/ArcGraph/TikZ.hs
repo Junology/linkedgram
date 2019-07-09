@@ -24,6 +24,8 @@ import Data.List
 import qualified Data.Map.Strict as Map
 import Data.Foldable
 
+import Numeric
+
 import Numeric.Algebra.FreeModule
 import Numeric.Algebra.Frobenius
 
@@ -53,8 +55,14 @@ texHorizontalLine :: String
 texHorizontalLine
   = "\\leavevmode\n\\\\\n\\noindent\\makebox[\\linewidth]{\\rule{\\paperwidth}{0.4pt}}\n"
 
+tikzFloat :: Double -> String
+tikzFloat x = showFFloat (Just 4) x ""
+
+tikzVertex :: Vertex -> String
+tikzVertex (x,y) = "(" ++ tikzFloat x ++ "," ++ tikzFloat y ++ ")"
+
 tikzBegin :: Double -> String
-tikzBegin scale = "\\begin{tikzpicture}[scale=" ++ show scale ++ "]\n"
+tikzBegin scale = "\\begin{tikzpicture}[scale=" ++ tikzFloat scale ++ "]\n"
 
 tikzEnd :: String
 tikzEnd = "\\end{tikzpicture}\n"
@@ -64,7 +72,7 @@ drawCommand Nothing = "\\draw[ultra thick, cap=round]"
 drawCommand (Just colname) = "\\draw[" ++ colname ++ ",ultra thick, cap=round]"
 
 nodeCommand :: Double -> Double -> String -> String
-nodeCommand x y str = "\\node at " ++ show (x,y) ++ "{" ++ str ++ "};"
+nodeCommand x y str = "\\node at " ++ tikzVertex (x,y) ++ "{" ++ str ++ "};"
 
 tikzColors :: [String]
 tikzColors = ["red",
@@ -88,21 +96,21 @@ tikzColors = ["red",
 
 lineToCommand :: Maybe String -> Vertex -> Vertex -> String
 lineToCommand colname v w
-  = drawCommand colname ++ show v ++ " -- " ++ show w ++ ";\n"
+  = drawCommand colname ++ tikzVertex v ++ " -- " ++ tikzVertex w ++ ";\n"
 
 bezierToCommand :: Maybe String -> BezierCube -> String
 bezierToCommand colname (v0, v1, v2, v3)
   = drawCommand colname
-    ++ " " ++ show v0
-    ++ " .. controls " ++ show v1
-    ++ " and " ++ show v2
-    ++ " .. " ++ show v3
+    ++ " " ++ tikzVertex v0
+    ++ " .. controls " ++ tikzVertex v1
+    ++ " and " ++ tikzVertex v2
+    ++ " .. " ++ tikzVertex v3
     ++ ";\n"
 
 showArcPathTikz :: Maybe String -> ArcPath -> String
 showArcPathTikz colname pth
   = let bs = fmap elevateBezier (mkBezier pth)
-    in foldl (++) "" $ fmap (bezierToCommand colname) bs
+    in concatMap (bezierToCommand colname) bs
 
 showCrossTikz :: Double -> Cross -> String
 showCrossTikz bd (Crs sega segb crst)
@@ -123,24 +131,24 @@ showCrossTikz bd (Crs sega segb crst)
                q2 = ((v1x+2.0*cx)/3.0, (v1y+2.0*cy)/3.0)
            modify' (++bezierToCommand Nothing (v0,p1,p2,w1))
            modify' (++bezierToCommand Nothing (w0,q1,q2,v1))
-         Smooth1 -> do
+         Smooth1 ->
            showCrossTikz bd (Crs (tposeSegment sega) segb Smooth0)
 
 showArcGraphTikz :: Double -> ArcGraph -> String
 showArcGraphTikz bd ag = flip execState "" $ do
   let (AGraph ps cs) = slimCross $ normalize 1.0 ag
-  for_ ps $ \path -> do
+  for_ ps $ \path ->
     modify' (++ showArcPathTikz Nothing path)
-  modify' (++ concat (map (showCrossTikz bd) cs))
+  modify' (++ concatMap (showCrossTikz bd) cs)
 
 showArcGraphTikzWithComp :: Double -> ArcGraph -> DiagramState -> String
 showArcGraphTikzWithComp bd ag st = flip execState "" $ do
   let ag'@(AGraph ps cs) = smoothing st $ normalize 1.0 ag
   for_ (zip (components ag') (cycle $ map Just tikzColors)) $ \ipsc -> do
     let (ips,c) = ipsc
-    for_ ips $ \i -> do
+    for_ ips $ \i ->
       modify' (++ showArcPathTikz c (ps!!i))
-  modify' (++ concat (map (showCrossTikz bd) cs))
+  modify' (++ concatMap (showCrossTikz bd) cs)
 
 showArcGraphEnhTikz :: Double -> ArcGraphE -> String
 showArcGraphEnhTikz bd (AGraphE ag st coeffMap) = flip execState "" $ do
@@ -165,18 +173,30 @@ showStateSumTikz bd vect = flip execState "" $ do
       modify' (++ showArcGraphEnhTikz bd agE)
       modify' (++"}\n")
 
+flatZip :: Eq a => [a] -> [(Int,a)]
+flatZip [] = []
+flatZip xs@(_:_) = uncurry (:) $ foldr bin ((1,last xs),[]) (init xs)
+  where
+    bin y ((n,z),zs)
+      | y==z      = ((n+1,z),zs)
+      | otherwise = ((1,y),(n,z):zs)
+
 showAbGroupTeX :: Int -> [Int] -> String
 showAbGroupTeX freeRk torsions =
   case torsions of
     []{- no torsion -}
       | freeRk > 0 -> freepart freeRk
-      | True       -> "0"
+      | otherwise  -> "0"
     _ {- has torsions -}
       | freeRk > 0 -> freepart freeRk ++ "\\oplus " ++ torpart torsions
-      | True       -> torpart torsions
+      | otherwise  -> torpart torsions
   where
     freepart rk = "\\mathbb Z^{\\oplus " ++ show rk ++ "}"
-    torpart trs = intercalate "\\oplus " $ map (("\\mathbb Z/"++). show) trs
+    markupTor (r,t)
+      | r <= 0 = "0"
+      | r == 1 = "\\mathbb Z/" ++ show t
+      | r >= 2 = "\\left(\\mathbb Z/" ++ show t ++ "\\right)^{" ++ show r ++ "}"
+    torpart trs = intercalate "\\oplus " $ map markupTor (flatZip trs)
 
 showHomologyTableTeX :: Map.Map (Int,Int) KHData -> String
 showHomologyTableTeX khMap =
@@ -186,12 +206,12 @@ showHomologyTableTeX khMap =
        (Just (imin,imax,jmin,jmax)) -> flip execState "" $ do
          modify' (++("\\begin{array}{r|" ++ replicate (jmax-jmin+1) 'c' ++ "}\n"))
          modify' (++"i\\backslash j & ")
-         forM_ [jmin..jmax] $ \j -> do
+         forM_ [jmin..jmax] $ \j ->
            modify'(++(show j ++ if j<jmax then "&" else "\\\\\\hline\n"))
          forM_ [imin..imax] $ \i -> do
            modify' (++(show i ++ "&"))
            forM_ [jmin..jmax] $ \j -> do
-             case (khMap Map.!? (i,j)) of
+             case khMap Map.!? (i,j) of
                Just khdata ->
                  modify' (++ showAbGroupTeX (rank khdata) (tors khdata))
                Nothing ->
