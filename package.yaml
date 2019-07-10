@@ -16,6 +16,8 @@ dependencies:
   - mtl
   - containers
   - monad-loops
+  - parallel
+  - deepseq
   - vector
   - text
   - matrix
@@ -40,3 +42,37 @@ executables:
     - -DPROJECT_COPYRIGHT_YEAR="2019"
     - -DPROJECT_LICENSE="BSD3"
     - -DPROJECT_HOMEPAGE="https://github.com/Junology/linkedgram#readme"
+    c-sources:
+    - src/Internal/C/*.c
+    cc-options: -O3 -fopenmp -march=native
+    ld-options: -O3 -march=native
+    extra-libraries:
+    - omp
+
+benchmarks:
+  linkedgram-bench:
+    source-dirs:
+    - benchmark
+    - src
+    other-modules:
+    - Numeric.Algebra.FreeModule
+    - Numeric.Algebra.Frobenius
+    - Numeric.Algebra.IntMatrix
+    - Numeric.Algebra.IntMatrix.HNFLLL
+    - Numeric.Algebra.IntMatrix.HermiteNFLLL
+    - Numeric.Algebra.IntMatrix.SmithNF
+    main:           BenchMain.hs
+    dependencies:
+    - criterion
+    ghc-options:
+    - -O
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    c-sources:
+    - src/Internal/C/*.c
+    cc-options: -O3 -fopenmp -march=native
+    ld-options: -O3
+    extra-libraries:
+    - omp
+    - m

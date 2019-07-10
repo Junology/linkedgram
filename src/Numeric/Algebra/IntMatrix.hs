@@ -10,10 +10,9 @@
 
 module Numeric.Algebra.IntMatrix (
   -- Hermite normal form
-  hnfLLL,
+  hermiteNF,
   -- Smith normal form
   smithNF,
-  preSmithNF, -- for Debug
   -- Compute Image and Kernel
   kerImOf,
   -- Translation
@@ -24,13 +23,28 @@ module Numeric.Algebra.IntMatrix (
   matdLAToData
   ) where
 
-import Numeric.Algebra.IntMatrix.HNFLLL
-import Numeric.Algebra.IntMatrix.SmithNF
+import Control.Monad
+import Control.Monad.ST (ST, runST)
+import Control.Monad.Loops (whileM_)
+import Data.STRef
+
+--import Numeric.Algebra.IntMatrix.HNFLLL
+--import Numeric.Algebra.IntMatrix.SmithNF
+import Numeric.Algebra.IntMatrix.NormalForms
 
 import qualified Numeric.LinearAlgebra as LA
 
 import qualified Data.Vector as V
 import qualified Data.Matrix as Mat
+
+-- Compute the submatrix containing all the non-zero diagonal entries
+extractMaxNZDiag :: LA.Matrix LA.Z -> (Int,LA.Matrix LA.Z)
+extractMaxNZDiag mx = runST $ do
+  dRef <- newSTRef 0
+  let p d = d < uncurry min (LA.size mx) && (mx LA.! d LA.! d) /= 0
+  whileM_ (p <$> readSTRef dRef) $ modifySTRef' dRef (+1)
+  d <- readSTRef dRef
+  return (d,LA.subMatrix (0,0) (d,d) mx)
 
 -- D = P <> A <> Q
 -- | Return (d,ker,im) where
@@ -43,16 +57,16 @@ kerImOf mt =
       (ull,_,ulr) = smithNF ul
       (rk,dmt) = extractMaxNZDiag h
       ker' = ur LA.¿ [rk..(LA.cols ur-1)]
-      (_,kert) = hnfLLL (LA.tr' ker')
+      (_,kert) = hermiteNF (LA.tr' ker')
       im' = (ulr LA.<> ull LA.<> h) LA.¿ [0..rk-1]
-      (_,imt) = hnfLLL (LA.tr' im')
+      (_,imt) = hermiteNF (LA.tr' im')
   in (LA.takeDiag dmt, LA.toRows kert, LA.toRows imt)
 
 -------------------------
 -- Translation of data --
 -------------------------
 vectiLAToData :: (Num a) => LA.Vector LA.Z -> V.Vector a
-vectiLAToData = V.fromList . map (fromIntegral) . LA.toList
+vectiLAToData = V.fromList . map fromIntegral . LA.toList
 
 matiDataToLA :: Integral a => Mat.Matrix a -> LA.Matrix LA.Z
 matiDataToLA mt =
