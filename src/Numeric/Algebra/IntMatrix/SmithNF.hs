@@ -21,7 +21,7 @@ import Numeric.LinearAlgebra as LA
 import Numeric.LinearAlgebra.Devel
 
 --import Numeric.Algebra.IntMatrix.HNFLLL (hnfLLLST)
-import Numeric.Algebra.IntMatrix.HermiteNFLLL (hermiteNFST)
+import Numeric.Algebra.IntMatrix.NormalForms (hermiteNFST)
 
 -- | Find off-diagonal entries and calculate min of min{row,col} among them
 findDiagSz :: LA.Matrix LA.Z -> Maybe Int

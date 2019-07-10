@@ -5,19 +5,20 @@
 
 ------------------------------------------------
 -- |
--- Module    :  Numeric.Algebra.IntMatrix.HermiteNFLLL
+-- Module    :  Numeric.Algebra.IntMatrix.NormalForms
 -- Copyright :  (c) Jun Yoshida 2019
 -- License   :  BSD3
 --
--- Compute Hermite normal forms in the LLL-based method.
--- The original "pseudo-code" is found in the paper
---   George Havas, Bohdan S. Majewski & Keith R. Matthews (1998) Extended GCD and Hermite Normal Form Algorithms via Lattice Basis Reduction, Experimental Mathematics, 7:2, 125-136, DOI: 10.1080/10586458.1998.10504362 
+-- Hermite Normal form and Smith normal form.
+-- For the algorithms, see c-source files in src/Internal/C.
 --
 ------------------------------------------------
 
-module Numeric.Algebra.IntMatrix.HermiteNFLLL (
+module Numeric.Algebra.IntMatrix.NormalForms (
   hermiteNFST,
-  hermiteNF
+  hermiteNF,
+  smithNFST,
+  smithNF
   ) where
 
 import Control.Monad.ST
@@ -54,3 +55,26 @@ hermiteNF mat = runST $ do
   stU <- thawMatrix $ ident r
   hermiteNFST stU stMat
   (,) <$> unsafeFreezeMatrix stU <*> unsafeFreezeMatrix stMat
+
+-- | Smith normal form
+foreign import ccall unsafe "c_smithNF" cSmithNF :: Z ::> Z ::> Z ::> Ok
+
+smithNFST :: STMatrix s LA.Z -> STMatrix s LA.Z ->  STMatrix s LA.Z -> ST s ()
+smithNFST stU stM stV = do
+  u <- unsafeFreezeMatrix stU
+  m <- unsafeFreezeMatrix stM
+  v <- unsafeFreezeMatrix stV
+  unsafeIOToST $ do
+    apply u (apply m (apply v id)) cSmithNF #| "cSmithNF"
+
+smithNF :: Matrix Z -> (Matrix Z, Matrix Z, Matrix Z)
+smithNF mat = runST $ do
+  let (r,c) = size mat
+  stMat <- thawMatrix mat
+  stU <- thawMatrix $ ident r
+  stV <- thawMatrix $ ident c
+  smithNFST stU stMat stV
+  (\x y z -> (x,y,z))
+    <$> unsafeFreezeMatrix stU
+    <*> unsafeFreezeMatrix stMat
+    <*> unsafeFreezeMatrix stV

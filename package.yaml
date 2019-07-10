@@ -43,12 +43,11 @@ executables:
     - -DPROJECT_LICENSE="BSD3"
     - -DPROJECT_HOMEPAGE="https://github.com/Junology/linkedgram#readme"
     c-sources:
-    - src/Numeric/Algebra/IntMatrix/HermiteNFLLL.c
+    - src/Internal/C/*.c
     cc-options: -O3 -fopenmp -march=native
-    ld-options: -O3
+    ld-options: -O3 -march=native
     extra-libraries:
     - omp
-    - m
 
 benchmarks:
   linkedgram-bench:
@@ -62,8 +61,6 @@ benchmarks:
     - Numeric.Algebra.IntMatrix.HNFLLL
     - Numeric.Algebra.IntMatrix.HermiteNFLLL
     - Numeric.Algebra.IntMatrix.SmithNF
-    - ArcGraph
-    - ArcGraph.EnhancedState
     main:           BenchMain.hs
     dependencies:
     - criterion
@@ -73,7 +70,7 @@ benchmarks:
     - -rtsopts
     - -with-rtsopts=-N
     c-sources:
-    - src/Numeric/Algebra/IntMatrix/HermiteNFLLL.c
+    - src/Internal/C/*.c
     cc-options: -O3 -fopenmp -march=native
     ld-options: -O3
     extra-libraries:
