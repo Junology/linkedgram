@@ -24,7 +24,9 @@ import qualified Data.Vector.Mutable as MV
 import Data.STRef
 import Data.Foldable (for_)
 
--- import Debug.Trace
+{- For debug
+import Debug.Trace
+--}
 
 -----------
 -- Types --
@@ -94,7 +96,7 @@ instance Ord ArcGraph where
 applyAdj :: (a -> a -> b) -> [a] -> [b]
 applyAdj _ [] = []
 applyAdj _ [_] = []
-applyAdj f (x:(xs@(y:_))) = f x y : applyAdj f xs
+applyAdj f (x:xs@(y:_)) = f x y : applyAdj f xs
 
 applyCycAdj :: (a -> a -> b) -> [a] -> [b]
 applyCycAdj _ [] = []
@@ -119,15 +121,15 @@ groupWith f (x:xs)
     wheel (ws,xss,ys,y) z
       = case f y z of
           Just u -> (ws ++ [u], xss++[ys++[y]], [], z)
-          Nothing -> (ws, xss, (ys++[y]), z)
+          Nothing -> (ws, xss, ys++[y], z)
 
 groupCycWith :: (a -> a -> Maybe b) -> [a] -> ([b],[[a]])
 groupCycWith _ [] = ([],[])
 groupCycWith f xs@(x:_) =
   case groupWith f (xs ++ [x]) of
     (mt, []) -> (mt, [])
-    (mt, ([]:wss)) -> (mt,wss)
-    (mt, ((y:ys):wss)) -> (mt, mapLast (++ys) wss)
+    (mt, []:wss) -> (mt,wss)
+    (mt, (y:ys):wss) -> (mt, mapLast (++ys) wss)
 
 condMap :: Functor f => (a -> Bool) -> (a -> a) -> f a -> f a
 condMap p f = fmap (\x -> if p x then f x else x)
@@ -253,8 +255,8 @@ hasEdge :: ArcPath -> Bool
 hasEdge p = arcLength p >= 1
 
 arcSegments :: ArcPath -> [Segment]
-arcSegments (APath OpenPath vs) = applyAdj (Sgmt) vs
-arcSegments (APath ClosedPath vs) = applyCycAdj (Sgmt) vs
+arcSegments (APath OpenPath vs) = applyAdj Sgmt vs
+arcSegments (APath ClosedPath vs) = applyCycAdj Sgmt vs
 
 arcVertices :: ArcPath -> [Vertex]
 arcVertices (APath _ vs) = vs
@@ -292,7 +294,7 @@ mapArcPath = mapRemoveM mapArcPathM
 getEndVrtx :: ArcPath -> [Vertex]
 getEndVrtx (APath _ []) = []
 getEndVrtx (APath ClosedPath (x:_)) = [x]
-getEndVrtx (APath OpenPath (x:[])) = [x]
+getEndVrtx (APath OpenPath [x]) = [x]
 getEndVrtx (APath OpenPath (x:xs@(_:_))) = [x,last xs]
 
 --------------
@@ -314,14 +316,14 @@ sumGraph crst (AGraph ps cs) (AGraph qs ds)
 moveVrtx :: [Vertex] -> Double -> Double -> ArcGraph -> Maybe ArcGraph
 moveVrtx vs x y (AGraph ps cs) = do
   let ps' = map updPath ps
-  cs' <- sequence (map updCrs cs)
+  cs' <- mapM updCrs cs
   return $ AGraph ps' cs'
   where
     updVrtx :: Vertex -> Vertex
     updVrtx (x0,y0) = (x0+x,y0+y)
     updPath :: ArcPath -> ArcPath
     updPath (APath ty ws)
-      = APath ty (condMap (flip elem vs) updVrtx ws)
+      = APath ty (condMap (`elem` vs) updVrtx ws)
     updSeg :: Segment -> Segment
     updSeg (Sgmt a b)
       = let a' = if a `elem` vs then updVrtx a else a
@@ -352,7 +354,7 @@ removeVrtx v (AGraph ps cs)
             | length vs >= 3 && i==length vs-1
               -> let f' = f >=> \v'-> if v==v' then Just (vs!!(i-1)) else Just v'
                  in(f', APath OpenPath (init vs))
-            | True
+            | otherwise
               -> (f,APath OpenPath (delete v vs))
           Nothing -> (f,p)
     rmVrtxFromPath f p@(APath ClosedPath vs)
@@ -379,20 +381,20 @@ tryGrowArcM _ _ (APath OpenPath []) = fail ""
 tryGrowArcM vrt vnew (APath OpenPath vs@(v:_))
   | vrt == v       = return (APath OpenPath (vnew:vs))
   | vrt == last vs = return (APath OpenPath (vs++[vnew]))
-  | True           = fail ""
+  | otherwise      = fail ""
 
 findIndexWith :: (a -> Maybe b) -> V.Vector a -> Maybe (b,Int)
-findIndexWith f xs = V.ifoldl' bin Nothing xs
+findIndexWith f = V.ifoldl' bin Nothing
   where
     bin Nothing i x = case f x of {Just y -> Just (y,i); Nothing -> Nothing;}
     bin j@(Just _) _ _  = j
 
 slimCross :: ArcGraph -> ArcGraph
 slimCross (AGraph ps cs) = runST $ do
-  psMVecRef <- newSTRef =<< (V.thaw $ V.fromList ps)
+  psMVecRef <- newSTRef =<< V.thaw (V.fromList ps)
   csMVec <- V.thaw $ V.fromList cs
   for_  [0..(length cs-1)] $ \i -> do
-    let (Crs sega@(Sgmt v0 v1) segb@(Sgmt w0 w1) crst) = (cs!!i)
+    let (Crs sega@(Sgmt v0 v1) segb@(Sgmt w0 w1) crst) = cs!!i
         c = fromJust $ calcCross sega segb
         vs'@(v0':v1':w0':w1':_) = map (\v -> barycenter [v,c]) [v0,v1,w0,w1]
     for_ [0..3] $ \k -> do
@@ -422,8 +424,8 @@ hitCross :: Vertex -> Cross -> Bool
 hitCross v (Crs (Sgmt a0 a1) (Sgmt b0 b1) _)
   = orientation a0 b0 v <> orientation a0 b0 a1 == Positive
     && orientation a0 b1 v <> orientation a0 b1 a1 == Positive
-    && orientation b0 a0 v <> orientation b0 a0 b1 == Positive
-    && orientation b0 a1 v <> orientation b0 a1 b1 == Positive
+    && orientation a1 b0 v <> orientation a1 b0 a0 == Positive
+    && orientation a1 b1 v <> orientation a1 b1 a0 == Positive
 
 hitTest :: Double -> Vertex -> ArcGraph -> (Maybe Vertex, Maybe Int)
 hitTest rad v ag@(AGraph _ cs)
