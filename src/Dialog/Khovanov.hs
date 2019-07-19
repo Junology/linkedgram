@@ -13,6 +13,10 @@ module Dialog.Khovanov where
 import Control.Monad
 import Control.Monad.ST
 
+import Control.Parallel
+import Control.Parallel.Strategies
+
+import Data.Functor ((<&>))
 import Data.Maybe
 import qualified Data.Text as T
 import Data.List as L
@@ -48,7 +52,7 @@ import Debug.Trace
 --}
 
 pictSize :: Num a => a
-pictSize = fromIntegral 80
+pictSize = 80
 
 -- | Generate Pixbuf of smoothing diagrams
 genPixbufArcGraph :: ArcGraph -> Int -> IO ([DiagramState], Map.Map DiagramState Pixbuf)
@@ -165,30 +169,37 @@ showKhovanovDialog ag mayparent = do
                         (0,rs) -> prettyTor
                         (n,[]) -> prettyFree
                         (n,rs) -> prettyTor ++ " (+) " ++ prettyFree
-      unless (cohPretty == "0") $ do
+      unless (cohPretty == "0") $
         putStrLn $ "Kh^{" ++ show i ++ "," ++ show qdeg ++ "} = " ++ cohPretty
 
   btnSummary `on` buttonActivated $ do
-    -- Get selected states
-    agViewListV <- V.unsafeFreeze listMVec
-    states <- fmap (V.foldl' (++) []) $ V.forM agViewListV $ \agvlv -> do
-      let (smthList,agView) = agvlv
-      mapM (listStoreGetValue smthList)
-        =<< (map head <$> iconViewGetSelectedItems agView :: IO [Int])
-    -- Execute computation on all quantum-degrees
-    -- TODO: should be parallelized?
-    khMapRef <- newIORef (Map.empty)
-    forM_ [-(round maxQDeg)..(round maxQDeg)] $ \j ->
-      let khMapj = computeKhovanov slimAG [0..(MV.length listMVec)] j states
-      in modifyIORef' khMapRef $ Map.union khMapj
-    khMap <- readIORef khMapRef
     -- Write to the file
     mayfname <- showSaveDialog mayparent ""
     when (isJust mayfname) $ do
+      -- Get selected states
+      agViewListV <- V.unsafeFreeze listMVec
+      states <- fmap (V.foldl' (++) []) $ V.forM agViewListV $ \agvlv -> do
+        let (smthList,agView) = agvlv
+        mapM (listStoreGetValue smthList)
+          =<< (map head <$> iconViewGetSelectedItems agView :: IO [Int])
+      -- Execute computation on all quantum-degrees
+      --{-- parallel version
+      let !khMap = V.foldl' Map.union Map.empty $ withStrategy (parTraversable  rdeepseq) $ V.fromList [-(round maxQDeg)..(round maxQDeg)] <&> \j -> computeKhovanov slimAG [0..(MV.length listMVec)] j states
+      {-- non-parallel version
+      khMapRef <- newIORef Map.empty
+      forM_ [-(round maxQDeg)..(round maxQDeg)] $ \j ->
+        let khMapj = computeKhovanov slimAG [0..(MV.length listMVec)] j states
+        in modifyIORef' khMapRef $ Map.union khMapj
+      khMap <- readIORef khMapRef
+      --}
       writeFile (fromJust mayfname) (docKhovanovTikz ag "pdftex,a4paper" "scrartcl" khMap)
 
   -- Close the dialog when "Close" is pressed
   btnClose `on` buttonActivated $ do
+    agViewListV <- V.unsafeFreeze listMVec
+    -- Clear the list of states manually to avoid Gtk warnings.
+    forM_ agViewListV $ \l ->
+      listStoreClear (fst l)
     widgetDestroy khovanovDlg
 
   -- Run dialog

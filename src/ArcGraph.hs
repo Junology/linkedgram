@@ -1,5 +1,6 @@
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE StrictData #-}
+{-# LANGUAGE DeriveGeneric #-}
 
 ------------------------------------------------
 -- |
@@ -12,6 +13,10 @@
 ------------------------------------------------
 
 module ArcGraph where
+
+import GHC.Generics (Generic)
+
+import Control.DeepSeq (NFData)
 
 import Control.Monad
 import Control.Monad.Identity
@@ -44,16 +49,24 @@ instance Semigroup Orientation where
 
 type Vertex = (Double,Double)
 data Segment = Sgmt Vertex Vertex
-  deriving (Show, Read)
+  deriving (Show, Read, Generic)
+
+instance NFData Segment
 
 data PathType = OpenPath | ClosedPath
-  deriving (Eq, Read, Show)
+  deriving (Eq, Read, Show, Generic)
+
+instance NFData PathType
 
 data ArcPath = APath PathType [Vertex]
-  deriving (Eq,Show, Read)
+  deriving (Eq,Show, Read, Generic)
+
+instance NFData ArcPath
 
 data CrsState = Crossing | Smooth0 | Smooth1
-  deriving (Eq,Show, Read)
+  deriving (Eq,Show, Read, Generic)
+
+instance NFData CrsState
 
 instance Ord CrsState where
   compare Smooth0 Smooth0 = EQ
@@ -67,7 +80,9 @@ instance Ord CrsState where
   compare Smooth1 Smooth1 = EQ
 
 data Cross = Crs Segment Segment CrsState
-  deriving (Show, Read)
+  deriving (Show, Read, Generic)
+
+instance NFData Cross
 
 -- | Segment is unordered
 instance Eq Segment where
@@ -84,7 +99,9 @@ instance Ord Cross where
   compare (Crs _ _ crst) (Crs _ _ crst') = compare crst crst'
 
 data ArcGraph = AGraph [ArcPath] [Cross]
-  deriving (Eq,Show, Read)
+  deriving (Eq,Show, Read, Generic)
+
+instance NFData ArcGraph
 
 -- | Order comparison on crossings
 instance Ord ArcGraph where

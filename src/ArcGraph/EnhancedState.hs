@@ -1,5 +1,6 @@
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE StrictData #-}
+{-# LANGUAGE DeriveGeneric #-}
 
 ------------------------------------------------
 -- |
@@ -12,6 +13,10 @@
 ------------------------------------------------
 
 module ArcGraph.EnhancedState where
+
+import GHC.Generics (Generic)
+
+import Control.DeepSeq
 
 import Control.Monad
 import Control.Monad.ST
@@ -53,14 +58,19 @@ type DiagramState = [Int]
 
 smoothing :: DiagramState -> ArcGraph -> ArcGraph
 smoothing st (AGraph ps cs)
-  = AGraph ps $ map mkCrs $ zip [0..] cs
-  where mkCrs (i,Crs sega segb _) = if i `elem` st
-                                    then Crs sega segb Smooth1
-                                    else Crs sega segb Smooth0
+  = AGraph ps $ zipWith mkCrs [0..] cs
+  where
+    mkCrs i crs@(Crs sega segb crst)
+      | crst == Crossing = Crs sega segb (if i `elem` st then Smooth1 else Smooth0)
+      | otherwise = crs
 
 listStates :: ArcGraph -> Int -> [DiagramState]
 listStates (AGraph _ cs) deg =
-  filter ((==deg) . length) $ L.subsequences [0..(length cs - 1)]
+  let crsIndices = L.findIndices isCross cs
+  in filter ((==deg) . length) $ L.subsequences crsIndices
+  where
+    isCross (Crs _ _ Crossing) = True
+    isCross _ = False
 
 listSmoothing :: [Int] -> ArcGraph -> [ArcGraph]
 listSmoothing degrees ag
@@ -79,13 +89,13 @@ mkConnection p edgeMV cntRef = do
   edgeV <- V.freeze edgeMV
   cnt <- stepST cntRef
   oldLabRef <- newSTRef []
-  for_ (V.findIndices (p . snd) edgeV) $ \j -> do
+  for_ (V.findIndices (p . snd) edgeV) $ \j ->
     case fst (edgeV V.! j) of
       Just k -> modifySTRef' oldLabRef (k:)
       Nothing -> MV.modify edgeMV (\x -> (Just cnt,snd x)) j
   oldLab <- readSTRef oldLabRef
-  let isOldLab (mayl,_) = M.fromMaybe False $ (`elem` oldLab) <$> mayl
-  forM_ (V.findIndices isOldLab edgeV) $ \j -> do
+  let isOldLab (mayl,_) = maybe False (`elem` oldLab) mayl
+  forM_ (V.findIndices isOldLab edgeV) $ \j ->
     MV.modify edgeMV (\x -> (Just cnt,snd x)) j
 
 components :: ArcGraph -> [[Int]]
@@ -93,7 +103,7 @@ components (AGraph ps cs) = runST $ do
   let n = length ps
   edgeMV <- MV.new n
   -- Initialize buffer
-  forM_ [0..(n-1)] $ \i -> do
+  forM_ [0..(n-1)] $ \i ->
     MV.unsafeWrite edgeMV i (Nothing, getEndVrtx (ps!!i))
   cntRef <- newSTRef 0
   forM_ cs $ \c -> do
@@ -103,13 +113,13 @@ components (AGraph ps cs) = runST $ do
     -- Connect w0 <--> w1
     mkConnection (\x -> elem w0 x || elem w1 x) edgeMV cntRef
   (justcls,nocls) <- V.ifoldl' (\xs i y -> case fst y of {Just k -> ((k,[i]):fst xs,snd xs); Nothing -> (fst xs,[i]:snd xs);}) ([],[]) <$> V.unsafeFreeze edgeMV
-  return $ (Map.elems $ Map.fromListWith (++) justcls) ++ nocls
+  return $ Map.elems (Map.fromListWith (++) justcls) ++ nocls
 
 data ArcGraphE = AGraphE {
   arcGraph :: ArcGraph,
   state :: DiagramState,
-  enhLabel :: (Map.Map [Int] SL2B)
-  } deriving (Eq,Show)
+  enhLabel :: Map.Map [Int] SL2B
+  } deriving (Eq,Show,Generic)
 
 -- | Lexicographical order on ArcGraphE
 instance Ord ArcGraphE where
@@ -118,6 +128,8 @@ instance Ord ArcGraphE where
         LT -> LT
         GT -> GT
         EQ -> compare coeff coeff'
+
+instance NFData ArcGraphE
 
 enhancements :: Int -> ArcGraph -> DiagramState -> V.Vector (Map.Map [Int] SL2B)
 enhancements deg ag st = runST $ do
@@ -144,7 +156,7 @@ diffState :: ArcGraph -> DiagramState -> V.Vector (Int,DiagramState)
 diffState (AGraph _ cs) st = runST $ do
   resVecRef <- newSTRef V.empty
   signRef <- newSTRef 1
-  for_ [0..(length cs - 1)] $ \i -> do
+  for_ [0..(length cs - 1)] $ \i ->
     if i `elem` st
       then modifySTRef' signRef negate
       else do
@@ -161,7 +173,7 @@ differential (AGraphE ag st coeffMap) =
   in FM.sumFM $ runST $ do
     imageMV <- MV.unsafeNew (V.length dStVec)
     for_ [0..(V.length dStVec -1)] $ \i -> do
-      let (sign,dSt) = (dStVec V.! i)
+      let (sign,dSt) = dStVec V.! i
           imageAg = AGraphE ag dSt FM.@$>% Map.fromList FM.@$>% Frob.tqftZ hasIntersection (Map.toList coeffMap) (components (smoothing dSt ag))
       MV.write imageMV i (sign FM.@*% imageAg)
     V.unsafeFreeze imageMV
@@ -175,6 +187,9 @@ data KHData = KHData {
   tors :: [Int],
   cycleV :: [FreeMod Int ArcGraphE],
   bndryV :: [FreeMod Int ArcGraphE] }
+  deriving Generic
+
+instance NFData KHData
 
 -- | Compute Khovanov homology for given range of cohomological degrees and a given quantum-degree
 computeKhovanov :: ArcGraph -> [Int] -> Int -> [DiagramState] -> Map.Map (Int,Int) KHData
@@ -185,7 +200,7 @@ computeKhovanov ag hdegs qdeg states =
       slimAG = slimCross ag
   in runST $ do
     -- Define STRef to write the result
-    resultMapRef <- newSTRef (Map.empty)
+    resultMapRef <- newSTRef Map.empty
     -- Compute basis
     baseMVec <- MV.replicate (numCrs + 2) []
     forM_ [0..numCrs] $ \i -> do
@@ -204,16 +219,16 @@ computeKhovanov ag hdegs qdeg states =
         else unless (L.null base0) $ do
           let diffMat = genMatrix differential base0 base1
           let (dvec,ker,im) = kerImOf $ matiDataToLA diffMat
-          MV.write cycleMV i $ ker
-          MV.write bndryMV (i+1) $ im
+          MV.write cycleMV i ker
+          MV.write bndryMV (i+1) im
           MV.write diagcMV (i+1) $ map fromIntegral $ LA.toList dvec
     -- Compute Homology at degree (i,qdeg)
-    forM_ hdegs $ \i -> do
+    forM_ hdegs $ \i ->
       when (i <= numCrs) $ do
         base <- MV.read baseMVec i
         cycleL <- MV.read cycleMV i
         bndryL <- MV.read bndryMV i
-        let freeRk = (length cycleL) - (length bndryL)
+        let freeRk = length cycleL - length bndryL
         tor <- L.filter (/=1) <$> MV.read diagcMV i
         when (freeRk > 0 || not (L.null tor)) $ do
           let cycs' = map (map fromIntegral . LA.toList) cycleL
