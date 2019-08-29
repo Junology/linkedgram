@@ -8,7 +8,7 @@ import Numeric.LinearAlgebra
 import Numeric.Algebra.FreeModule
 import Numeric.Algebra.Frobenius
 import qualified Numeric.Algebra.IntMatrix.HNFLLL as HASKHNF
-import qualified Numeric.Algebra.IntMatrix.HermiteNFLLL as FFIHNF
+import qualified Numeric.Algebra.IntMatrix.NormalForms as FFIHNF
 
 import qualified Numeric.Algebra.IntMatrix.SmithNF as HASKSMITH
 

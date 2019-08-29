@@ -191,7 +191,9 @@ showAbGroupTeX freeRk torsions =
       | freeRk > 0 -> freepart freeRk ++ "\\oplus " ++ torpart torsions
       | otherwise  -> torpart torsions
   where
-    freepart rk = "\\mathbb Z^{\\oplus " ++ show rk ++ "}"
+    freepart rk
+      | rk == 1   = "\\mathbb Z"
+      | otherwise = "\\mathbb Z^{\\oplus " ++ show rk ++ "}"
     markupTor (r,t)
       | r <= 0 = "0"
       | r == 1 = "\\mathbb Z/" ++ show t

@@ -17,7 +17,7 @@
 #include "elementary.h"
 #include "hermite_lll.h"
 
-/* for debug
+/* Debug
 #include <stdio.h>
 // */
 
@@ -37,7 +37,8 @@ struct echelonsq_ld {
 
 struct hermite_data {
     matrix_type m;
-    matrix_type u;
+    size_t n_u;
+    matrix_type * restrict *u;
     struct echelonsq_ld lambda;
 };
 
@@ -64,7 +65,10 @@ static inline
 void swap(struct hermite_data * restrict data, size_t k)
 {
     swap_rows(k, k-1, &(data->m));
-    swap_rows(k, k-1, &(data->u));
+
+    #pragma omp parallel for
+    for (size_t l = 0; l < data->n_u; ++l)
+        swap_rows(k, k-1, data->u[l]);
 
     long double * restrict lambda = data->lambda.p;
 
@@ -101,7 +105,10 @@ void negate(struct hermite_data * restrict data, size_t k)
 {
     /* Negate k-th rows */
     scalar_row(k, -1, &(data->m));
-    scalar_row(k, -1, &(data->u));
+
+    #pragma omp parallel for
+    for (size_t l = 0; l < data->n_u; ++l)
+        scalar_row(k, -1, data->u[l]);
 
     long double * restrict lambda = data->lambda.p;
 
@@ -177,7 +184,10 @@ int reduce(struct hermite_data * restrict data, size_t k, size_t i, int flag)
     /* Reduce the k-th row vector by the i-th one. */
     if (q != 0) {
         axpy_rows(q, i, k, &(data->m));
-        axpy_rows(q, i, k, &(data->u));
+
+        #pragma omp parallel for
+        for (size_t l = 0; l < data->n_u; ++l)
+            axpy_rows(q, i, k, data->u[l]);
 
         long double * restrict lambda = data->lambda.p;
 
@@ -192,16 +202,20 @@ int reduce(struct hermite_data * restrict data, size_t k, size_t i, int flag)
 }
 
 /*!
- * Compute the (upside-down) Hermite normal form of the given matrix using elementary row operations.
+ * Compute a partial Hermite normal form of the given matrix using elementary row operations.
+ * Indeed, it is partial in the sense that the elimination is proceeded only on the first k rows before the simple reduction on the rest.
  * The same operations are executed on the other matrix, so one can get the transformation matrix by passing the identity matrix.
- * \pre the two matrices have to have the same number of rows.
+ * \pre The two matrices have to have the same number of rows.
  */
-void hermiteNF_LLL(matrix_type * restrict u, matrix_type * restrict m)
+void hermiteNF_LLL_partial(size_t n, matrix_type * restrict u[n], matrix_type * restrict m, size_t k)
 {
+    // If k exceeds the valid range, fix it.
+    k = (k > m->r) ? m->r : k;
+
     /* COMMENT:
      * It may be possible to use calloc instead of malloc to initialize all the off-diagonal entries to 0.
      * I do not so since I am not sure if it is safe to assume (double) 0.0 has "all bit 0" representation.
-     * And that is why the initialization step below.
+     * And that is the reason of the initialization step below.
      */
     long double *lambda = malloc(sizeof(long double) * (m->r+1)*(m->r+2)/2);
 
@@ -210,28 +224,72 @@ void hermiteNF_LLL(matrix_type * restrict u, matrix_type * restrict m)
         for (size_t j = 0; j <= i; ++j)
             lambda[ ECHEL_I(i,i) ] = (long double) (i == j);
 
-    struct hermite_data data = {*m, *u, {lambda, m->r+1}};
+    struct hermite_data data = {*m, n, u, {lambda, m->r+1}};
 
     /* Debug
     for (size_t i = 0; i < ur*uc; ++i)
         fprintf(stderr, "%"PRId64, up[i]);
     // */
 
-    /* The index of the row that we currently focus on */
-    size_t cur = 1;
+    /* The index of the row that we currently focus on
+     * Note that the row indices are upside-down.
+     */
+    size_t row_bnd = m->r - k;
+    size_t cur = row_bnd + 1;
 
-    /* Begin the algorithm. */
+    /* Proceed the algorithm on the first k rows. */
     while (cur < m->r) {
+
+        /* /Debug
+        fprintf(stderr, "%zu/%zu\n", cur, row_bnd);
+        // */
+
         if ( reduce(&data, cur, cur-1, 0) ) {
             swap(&data, cur);
-            if (cur > 1) --cur;
+            if (cur > row_bnd + 1) --cur;
         }
         else {
-            for (size_t i = 2; i <= cur; ++i)
+            for (size_t i = 2; i <= cur - row_bnd; ++i)
                 reduce(&data, cur, cur - i, 1);
             ++cur;
         }
     }
 
+    /* Simple reduction on the rest. */
+    for(size_t i = 0; i < row_bnd; ++i) {
+        for(size_t j = 1; j <= k; ++j) {
+            reduce(&data, i, m->r - j, 1);
+
+            /* /Debug
+            fprintf(stderr, "(i,j)=(%zu,%zu)\n", i, m->r - j);
+            // */
+        }
+    }
+
     free(lambda);
+}
+
+/*!
+ * Compute the Hermite normal form of the given matrix using elementary row operations.
+ * The same operations are executed on the other matrix, so one can get the transformation matrix by passing the identity matrix.
+ * \pre the two matrices have to have the same number of rows.
+ */
+void hermiteNF_LLL(size_t n, matrix_type * restrict u[n], matrix_type * restrict m)
+{
+    /* If the given matrix consists of a single row vector, then all we have to do is to ensure the first non-zero entry is positive. */
+    if (m->r == 1) {
+        for (size_t col1 = 0; col1 < m->c; ++col1)
+            if (MATRIX_AT(*m, 0, col1)) {
+                if ( MATRIX_AT(*m, 0, col1) < 0 ) {
+                    scalar_row(0, -1, m);
+                    #pragma omp parallel for
+                    for (size_t l = 0; l < n; ++l)
+                        scalar_row(0, -1, u[l]);
+                }
+                break;
+            }
+    }
+    else {
+        hermiteNF_LLL_partial(n, u, m, m->r);
+    }
 }

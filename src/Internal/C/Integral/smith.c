@@ -7,14 +7,15 @@
  * Compute the Smith normal forms by recursively application of hermiteNF_LLL.
  */
 
-/* / Debug
-#include <stdio.h>
-// */
-
 #include "common.h"
 #include "elementary.h"
 #include "hermite_lll.h"
 #include "smith.h"
+
+/* / Debug
+#include <stdio.h>
+// */
+#include <stdlib.h>
 
 typedef struct mat_index_t_ {
     size_t i,j;
@@ -95,9 +96,9 @@ void elim_offdiag(matrix_type * restrict u, matrix_type * restrict m, matrix_typ
     };
 
     while(m_iter.r > 0 && m_iter.c > 0) {
-        hermiteNF_LLL(&u_iter, &m_iter);
+        hermiteNF_LLL(1, (matrix_type*[]){&u_iter}, &m_iter);
         transpose(&m_iter);
-        hermiteNF_LLL(&vt_iter, &m_iter);
+        hermiteNF_LLL(1, (matrix_type*[]){&vt_iter}, &m_iter);
         transpose(&m_iter);
 
         size_t k = max_diagonal(&m_iter);
@@ -179,4 +180,80 @@ void smithNF(matrix_type * restrict u, matrix_type * restrict m, matrix_type * r
         --v_iter.c;
         v_iter.p += v_iter.Xc;
     }
+}
+
+/*!
+ * Compute a representation of a linear map by a smith normal form.
+ * More precisely, for a linear map f:Z^r->Z^s, this function computes a commutative diagram
+ *       f
+ *   Z^r → Z^s
+ *   V ↑   ↑ U
+ *   Z^r → Z^s
+ *       S
+ * where 
+ * - U and V are unimodular;
+ * - S is in a Smith normal form.
+ * \param a transformed into a.U.
+ * \param m A representation matrix for f; transformed into S.
+ * \param b transformed into b.V.
+ * \pre Be sure that both a.U and b.V make sense.
+ */
+void smithRep(matrix_type * restrict a, matrix_type * restrict m, matrix_type * restrict b)
+{
+    // Temporary matrix 1
+    matrix_type tmp1 = {
+        .p = calloc(m->r * m->r, sizeof(target_type)),
+        .r = m->r,
+        .c = m->r,
+        .Xr = m->r,
+        .Xc = 1
+    };
+
+    // Temporary matrix 2
+    matrix_type tmp2 = {
+        .p = calloc(m->r * m->r, sizeof(target_type)),
+        .r = m->r,
+        .c = m->r,
+        .Xr = m->r,
+        .Xc = 1
+    };
+
+    for(size_t i = 0; i < m->r; ++i) {
+        MATRIX_AT(tmp1, i, i) = 1;
+        MATRIX_AT(tmp2, i, i) = 1;
+    }
+
+    /* Compute the Smith normal form of m. */
+    /* The inverse of U is stored in tmp1 */
+    smithNF(&tmp1,m,b);
+
+    // Compute the rank / Q.
+    size_t rk = find_first_zero_diag(m);
+
+    /* Begining of the algorithm. */
+    /* Transposition since we want to operate columns instead of rows. */
+    transpose(a);
+    transpose(&tmp1);
+
+    /* Multiply a by U from the right. */
+    /* This also makes tmp1 be the identity. */
+    hermiteNF_LLL(2, (matrix_type*[]){a,&tmp2}, &tmp1);
+
+    /* Make U cleaner */
+    /* And apply the associated modification to a. */
+    hermiteNF_LLL_partial(1, (matrix_type*[]){&tmp1}, &tmp2, rk);
+
+    for(size_t i = rk; i < a->r; ++i) {
+        if (MATRIX_AT(tmp1,i,i) < 0) // This entry is 1 or -1.
+            scalar_row(i, -1, &tmp1);
+
+        for(size_t j = 0; j < rk; ++j)
+            axpy_rows(MATRIX_AT(tmp1,j,i), i, j, a);
+    }
+
+    /* End of the algorithm. */
+    transpose(a);
+
+    free(tmp1.p);
+    free(tmp2.p);
 }

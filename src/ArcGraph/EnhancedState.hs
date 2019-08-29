@@ -17,6 +17,7 @@ module ArcGraph.EnhancedState where
 import GHC.Generics (Generic)
 
 import Control.DeepSeq
+import Control.Parallel.Strategies
 
 import Control.Monad
 import Control.Monad.ST
@@ -28,6 +29,7 @@ import qualified Data.List as L
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as MV
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 
 import qualified Numeric.LinearAlgebra as LA
 
@@ -36,6 +38,7 @@ import ArcGraph
 import Numeric.Algebra.FreeModule as FM
 import Numeric.Algebra.Frobenius as Frob
 import Numeric.Algebra.IntMatrix
+import Numeric.Algebra.IntChain
 
 {-- for debug
 import Debug.Trace
@@ -191,12 +194,47 @@ data KHData = KHData {
 
 instance NFData KHData
 
+vecToSum :: (Integral a, Num a, LA.Element a, Ord b) => [b] -> LA.Vector a -> FreeMod Int b
+vecToSum bs v = sumFM $! zipWith (@*@%) (fromIntegral <$!> LA.toList v) bs
+
+cohomologyToKH :: [ArcGraphE] -> IntHomology -> KHData
+cohomologyToKH basis hdata =
+  KHData {
+    rank = L.length (freeCycs hdata),
+    tors = fmap (fromIntegral . snd) (torCycs hdata),
+    cycleV = fmap (vecToSum basis) (freeCycs hdata ++ fmap fst (torCycs hdata)),
+    bndryV = fmap (vecToSum basis) (bndries hdata) }
+
 -- | Compute Khovanov homology for given range of cohomological degrees and a given quantum-degree
-computeKhovanov :: ArcGraph -> [Int] -> Int -> [DiagramState] -> Map.Map (Int,Int) KHData
-computeKhovanov ag hdegs qdeg states =
+computeKhovanov :: ArcGraph -> Int -> Int -> Int -> [DiagramState] -> Map.Map (Int,Int) KHData
+computeKhovanov ag minhdeg maxhdeg qdeg states =
   let numCrs = countCross ag
-      hdegsNHD = filter isNhd [0..numCrs]
-        where isNhd i = elem i hdegs || elem (i+1) hdegs || elem (i-1) hdegs
+      minhdeg' = max 0 (minhdeg-1)
+      maxhdeg' = min numCrs (maxhdeg+1)
+      hdegsNHD = [minhdeg' .. maxhdeg']
+      slimAG = slimCross ag
+      basis i = L.concatMap (enhancedStatesL (qdeg-i) slimAG) (filter ((==i). L.length) states)
+      basisMap = Map.fromSet basis (Set.fromList hdegsNHD)
+      diffs = flip (parMap rdeepseq) [minhdeg'..maxhdeg'-1] $ \i ->
+        let sbasis = basisMap Map.! i
+            tbasis = basisMap Map.! (i+1)
+        in force $ if null sbasis || null tbasis
+                   then (length tbasis LA.>< length sbasis) []
+                   else matiDataToLA $ genMatrix differential sbasis tbasis
+  in if maxhdeg' <= minhdeg'
+     then -- The case where there is no crossing point;
+       Map.mapKeysMonotonic (\i -> (i,qdeg)) $ Map.map (\v -> KHData (L.length v) [] (fmap (1@*@%) v) []) basisMap
+     else -- The case where there is at least one crossing point;
+       let hdata = force $ intHomology (L.head diffs) (L.tail diffs)
+           hdataMap = Map.fromList $ filter (\hdti -> fst hdti >= minhdeg && fst hdti <= maxhdeg && not (null (freeCycs (snd hdti)) && null (torCycs (snd hdti))) ) $ zip [minhdeg'..maxhdeg'] hdata
+           khMap = flip Map.mapWithKey hdataMap $ \i hdt -> cohomologyToKH (basisMap Map.! i) hdt
+       in Map.mapKeysMonotonic (\i -> (i,qdeg {- -2*i -})) khMap
+
+-- | Compute Khovanov homology for given range of cohomological degrees and a given quantum-degree
+computeKhovanov' :: ArcGraph -> Int -> Int -> Int -> [DiagramState] -> Map.Map (Int,Int) KHData
+computeKhovanov' ag minhdeg maxhdeg qdeg states =
+  let numCrs = countCross ag
+      hdegsNHD = [max 0 (minhdeg-1) .. min numCrs (maxhdeg+1)]
       slimAG = slimCross ag
   in runST $ do
     -- Define STRef to write the result
@@ -223,7 +261,7 @@ computeKhovanov ag hdegs qdeg states =
           MV.write bndryMV (i+1) im
           MV.write diagcMV (i+1) $ map fromIntegral $ LA.toList dvec
     -- Compute Homology at degree (i,qdeg)
-    forM_ hdegs $ \i ->
+    forM_ [minhdeg..maxhdeg] $ \i ->
       when (i <= numCrs) $ do
         base <- MV.read baseMVec i
         cycleL <- MV.read cycleMV i

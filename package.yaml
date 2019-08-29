@@ -35,6 +35,10 @@ executables:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
+    c-sources:
+    - src/Internal/C/**/*.c
+    cc-options: -O3 -fopenmp -march=native
+    cpp-options:
     - -DPROJECT_NAME="linkedgram"
     - -DPROJECT_VERSION="0.1.0.0"
     - -DPROJECT_AUTHOR_GIVEN="Jun"
@@ -42,9 +46,6 @@ executables:
     - -DPROJECT_COPYRIGHT_YEAR="2019"
     - -DPROJECT_LICENSE="BSD3"
     - -DPROJECT_HOMEPAGE="https://github.com/Junology/linkedgram#readme"
-    c-sources:
-    - src/Internal/C/*.c
-    cc-options: -O3 -fopenmp -march=native
     ld-options: -O3 -march=native
     extra-libraries:
     - omp
@@ -59,7 +60,7 @@ benchmarks:
     - Numeric.Algebra.Frobenius
     - Numeric.Algebra.IntMatrix
     - Numeric.Algebra.IntMatrix.HNFLLL
-    - Numeric.Algebra.IntMatrix.HermiteNFLLL
+    - Numeric.Algebra.IntMatrix.NormalForms
     - Numeric.Algebra.IntMatrix.SmithNF
     main:           BenchMain.hs
     dependencies:
@@ -70,9 +71,8 @@ benchmarks:
     - -rtsopts
     - -with-rtsopts=-N
     c-sources:
-    - src/Internal/C/*.c
-    cc-options: -O3 -fopenmp -march=native
-    ld-options: -O3
+    - src/Internal/C/**/*.c
+    cc-options: -O3 -march=native
+    ld-options: -O3 -march=native
     extra-libraries:
     - omp
-    - m

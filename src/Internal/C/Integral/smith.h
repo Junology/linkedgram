@@ -12,3 +12,5 @@
 #include "common.h"
 
 void smithNF(matrix_type * restrict u, matrix_type * restrict m, matrix_type * restrict v);
+
+void smithRep(matrix_type * restrict a, matrix_type * restrict m, matrix_type * restrict b);

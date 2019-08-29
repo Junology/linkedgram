@@ -158,7 +158,7 @@ showKhovanovDialog ag mayparent = do
         =<< (map head <$> iconViewGetSelectedItems agView :: IO [Int])
 
     -- Execute the computation
-    let khResult = computeKhovanov slimAG [0..(MV.length listMVec)] qdeg states
+    let khResult = computeKhovanov slimAG 0 (MV.length listMVec) qdeg states
     -- Print the result
     forM_ (Map.toList khResult) $ \khi -> do
       let ((i,_),KHData freeRk torsion cycleL bndryL) = khi
@@ -184,7 +184,7 @@ showKhovanovDialog ag mayparent = do
           =<< (map head <$> iconViewGetSelectedItems agView :: IO [Int])
       -- Execute computation on all quantum-degrees
       --{-- parallel version
-      let !khMap = V.foldl' Map.union Map.empty $ withStrategy (parTraversable  rdeepseq) $ V.fromList [-(round maxQDeg)..(round maxQDeg)] <&> \j -> computeKhovanov slimAG [0..(MV.length listMVec)] j states
+      let !khMap = V.foldl' Map.union Map.empty $ {- withStrategy (parTraversable  rdeepseq) $ -} V.fromList [-(round maxQDeg)..(round maxQDeg)] <&> \j -> computeKhovanov slimAG 0 (MV.length listMVec) j states
       {-- non-parallel version
       khMapRef <- newIORef Map.empty
       forM_ [-(round maxQDeg)..(round maxQDeg)] $ \j ->
