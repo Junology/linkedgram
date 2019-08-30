@@ -30,6 +30,7 @@ import Numeric.Algebra.Frobenius
 
 import ArcGraph
 import ArcGraph.Common
+import ArcGraph.State
 import ArcGraph.EnhancedState
 
 drawVertex :: Double -> Double -> Double -> Double -> Vertex -> Cairo.Render ()
@@ -102,10 +103,10 @@ drawArcGraph ag@(AGraph ps cs) mayrgb = do
     Just (r,g,b) -> drawArcGraphVrtx r g b ag
     Nothing -> return ()
 
-drawArcGraphEnh :: ArcGraphE -> Double -> Double -> Double -> Double -> Cairo.Render ()
+drawArcGraphEnh :: (DState ds) => ArcGraphE ds -> Double -> Double -> Double -> Double -> Cairo.Render ()
 drawArcGraphEnh (AGraphE ag@(AGraph ps _) st coeffMap) sz r g b = do
   -- Draw arc graph
-  drawArcGraph (smoothing st ag) Nothing
+  drawArcGraph (smoothing ag st) Nothing
   -- Draw labels in the enhanced state
   Cairo.save
   Cairo.setSourceRGB r g b
@@ -118,7 +119,7 @@ drawArcGraphEnh (AGraphE ag@(AGraph ps _) st coeffMap) sz r g b = do
     Cairo.showText $ case coeff of {SLI -> "1"; SLX -> "X";}
   Cairo.restore
 
-drawStateSum :: FreeMod Int ArcGraphE -> Double -> Double -> Double -> Cairo.Render ()
+drawStateSum :: (DState ds) => FreeMod Int (ArcGraphE ds) -> Double -> Double -> Double -> Cairo.Render ()
 drawStateSum vect r g b = do
   Cairo.save
   Cairo.setFontSize 20

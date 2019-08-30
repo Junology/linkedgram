@@ -30,6 +30,8 @@ import Numeric.Algebra.FreeModule
 import Numeric.Algebra.Frobenius
 
 import ArcGraph
+import ArcGraph.Component
+import ArcGraph.State
 import ArcGraph.EnhancedState
 import ArcGraph.Common
 
@@ -68,8 +70,8 @@ tikzEnd :: String
 tikzEnd = "\\end{tikzpicture}\n"
 
 drawCommand :: Maybe String -> String
-drawCommand Nothing = "\\draw[ultra thick, cap=round]"
-drawCommand (Just colname) = "\\draw[" ++ colname ++ ",ultra thick, cap=round]"
+drawCommand Nothing = "\\draw[very thick, cap=round]"
+drawCommand (Just colname) = "\\draw[" ++ colname ++ ",very thick, cap=round]"
 
 nodeCommand :: Double -> Double -> String -> String
 nodeCommand x y str = "\\node at " ++ tikzVertex (x,y) ++ "{" ++ str ++ "};"
@@ -141,16 +143,16 @@ showArcGraphTikz bd ag = flip execState "" $ do
     modify' (++ showArcPathTikz Nothing path)
   modify' (++ concatMap (showCrossTikz bd) cs)
 
-showArcGraphTikzWithComp :: Double -> ArcGraph -> DiagramState -> String
+showArcGraphTikzWithComp :: DState s => Double -> ArcGraph -> s -> String
 showArcGraphTikzWithComp bd ag st = flip execState "" $ do
-  let ag'@(AGraph ps cs) = smoothing st $ normalize 1.0 ag
+  let ag'@(AGraph ps cs) = smoothing (normalize 1.0 ag) st
   for_ (zip (components ag') (cycle $ map Just tikzColors)) $ \ipsc -> do
     let (ips,c) = ipsc
     for_ ips $ \i ->
       modify' (++ showArcPathTikz c (ps!!i))
   modify' (++ concatMap (showCrossTikz bd) cs)
 
-showArcGraphEnhTikz :: Double -> ArcGraphE -> String
+showArcGraphEnhTikz :: (DState ds) => Double -> ArcGraphE ds -> String
 showArcGraphEnhTikz bd (AGraphE ag st coeffMap) = flip execState "" $ do
   let normAG@(AGraph ps _) = normalize 1.0 ag
   modify' (++ showArcGraphTikzWithComp bd normAG st)
@@ -160,13 +162,13 @@ showArcGraphEnhTikz bd (AGraphE ag st coeffMap) = flip execState "" $ do
     -- Draw label
     modify' (++ (nodeCommand x y $ case coeff of {SLI -> "$1$"; SLX -> "$X$";}))
 
-showStateSumTikz :: Double -> FreeMod Int ArcGraphE -> String
+showStateSumTikz :: (DState ds) => Double -> FreeMod Int (ArcGraphE ds) -> String
 showStateSumTikz bd vect = flip execState "" $ do
   modify' (++"\\begin{dmath*}\n")
   forEachWithInterM drawAG (modify' (++"+")) vect
   modify' (++"\\end{dmath*}\n")
   where
-    drawAG :: Int -> ArcGraphE -> State String ()
+    drawAG :: (DState ds) => Int -> ArcGraphE ds -> State String ()
     drawAG coeff agE = do
       modify' (++ show coeff)
       modify' (++"\\tikz{%\n")
@@ -200,7 +202,7 @@ showAbGroupTeX freeRk torsions =
       | r >= 2 = "\\left(\\mathbb Z/" ++ show t ++ "\\right)^{" ++ show r ++ "}"
     torpart trs = intercalate "\\oplus " $ map markupTor (flatZip trs)
 
-showHomologyTableTeX :: Map.Map (Int,Int) KHData -> String
+showHomologyTableTeX :: Map.Map (Int,Int) (KHData ds) -> String
 showHomologyTableTeX khMap =
   let mayRange = foldl' rangeFinder Nothing (Map.keys khMap)
   in case mayRange of
@@ -230,7 +232,7 @@ showHomologyTableTeX khMap =
           jmax' = if j > jmax then j else jmax
       in Just (imin',imax',jmin',jmax')
 
-showKHDataTikz :: Int -> Int -> KHData -> String
+showKHDataTikz :: (DState ds) => Int -> Int -> KHData ds -> String
 showKHDataTikz i j khData = flip execState "" $ do
   modify' (++ texParagraph "Homology group")
   modify' (++ "\\[\n")
@@ -239,10 +241,13 @@ showKHDataTikz i j khData = flip execState "" $ do
   modify' (++ "\\]\n")
   modify' (++ texParagraph "Generating cycles")
   forM_ (cycleV khData) $ \cyc -> modify' (++ showStateSumTikz 0.15 cyc)
-  modify' (++ texParagraph "Killing boundaries")
-  forM_ (bndryV khData) $ \bnd -> modify' (++ showStateSumTikz 0.15 bnd)
+  case bndryV khData of
+    Just bnds -> do
+      modify' (++ texParagraph "Killing boundaries")
+      forM_ bnds (\bnd -> modify' (++ showStateSumTikz 0.15 bnd))
+    Nothing -> return ()
 
-docKhovanovTikz :: ArcGraph -> String -> String -> Map.Map (Int,Int) KHData -> String
+docKhovanovTikz :: (DState ds) => ArcGraph -> String -> String -> Map.Map (Int,Int) (KHData ds) -> String
 docKhovanovTikz ag opts cls khMap = flip execState "" $ do
   modify' (++ texHeader opts cls)
   modify' (++ texPreamble)

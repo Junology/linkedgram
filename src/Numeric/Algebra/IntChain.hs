@@ -74,7 +74,7 @@ squeezeMat basis matA matB = runST $ do
   invFs <- takeWhile (/=0) <$!> LA.toList <$!> LA.takeDiag <$!> LA.unsafeFreezeMatrix stMatA
   let rkQ = length invFs -- rank over the field of fractions; e.g. Q for Z
   -- Free closure of the image of matA & its orthogonal.
-  fimage <- if LA.rows matA > 0
+  fimage <- if LA.rows matA > 0 && rkQ > 0
             then LA.extractMatrix stU LA.AllRows (LA.ColRange 0 (rkQ-1))
             else return $ (LA.rows matA LA.>< 0) []
   fcoker <- if LA.rows matA > 0 && rkQ < LA.rows matA
@@ -106,9 +106,16 @@ intHomology headD tailDs =
   in uncurry (combine coker) $ mapAccumL step (IntHomology [] [] []) smiths
   where
     step hdata smith =
-      let newcyc = drop (length (invFactor smith)) $ LA.toColumns (basisS smith)
+      let rk = length (invFactor smith)
+          newcyc = drop rk $ LA.toColumns (basisS smith)
           (ones,tors) = span (==1) (invFactor smith)
           torcycs = LA.toColumns $ LA.dropColumns (length ones) (basisT smith)
-          bnds = zipWith LA.scale (invFactor smith) (LA.toColumns (basisT smith))
+          !bnds = force $! runST $ do
+            stBT <- LA.thawMatrix (LA.tr' (basisT smith))
+            forM_ [0 .. length (invFactor smith) - 1] $ \i -> do
+              let r = invFactor smith !! i
+              when (r /= 1) $ LA.rowOper (LA.SCAL r (LA.Row i) LA.AllCols) stBT
+            flip hermiteNFST stBT =<< LA.newMatrix 0 rk 0
+            LA.toRows <$!> LA.unsafeFreezeMatrix stBT
       in (IntHomology [] (zip torcycs tors) bnds, hdata {freeCycs = newcyc})
     combine coker hdata ts = ts <|> pure hdata {freeCycs = LA.toColumns coker}

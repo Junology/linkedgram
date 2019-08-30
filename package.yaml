@@ -23,6 +23,7 @@ dependencies:
   - matrix
   - hmatrix
   - directory
+  - bitarray
   - gtk3
   - cairo
 

@@ -1,6 +1,7 @@
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE StrictData #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveAnyClass #-}
 
 ------------------------------------------------
 -- |
@@ -49,24 +50,16 @@ instance Semigroup Orientation where
 
 type Vertex = (Double,Double)
 data Segment = Sgmt Vertex Vertex
-  deriving (Show, Read, Generic)
-
-instance NFData Segment
+  deriving (Show, Read, Generic, NFData)
 
 data PathType = OpenPath | ClosedPath
-  deriving (Eq, Read, Show, Generic)
-
-instance NFData PathType
+  deriving (Eq, Read, Show, Generic, NFData)
 
 data ArcPath = APath PathType [Vertex]
-  deriving (Eq,Show, Read, Generic)
-
-instance NFData ArcPath
+  deriving (Eq,Show, Read, Generic, NFData)
 
 data CrsState = Crossing | Smooth0 | Smooth1
-  deriving (Eq,Show, Read, Generic)
-
-instance NFData CrsState
+  deriving (Eq,Show, Read, Generic, NFData)
 
 instance Ord CrsState where
   compare Smooth0 Smooth0 = EQ
@@ -80,11 +73,9 @@ instance Ord CrsState where
   compare Smooth1 Smooth1 = EQ
 
 data Cross = Crs Segment Segment CrsState
-  deriving (Show, Read, Generic)
+  deriving (Show, Read, Generic, NFData)
 
-instance NFData Cross
-
--- | Segment is unordered
+-- | Segment is unoriented
 instance Eq Segment where
   (Sgmt v0 v1) == (Sgmt w0 w1)
     = (v0==w0 && v1==w1) || (v0==w1 && v1==w0)
@@ -99,9 +90,7 @@ instance Ord Cross where
   compare (Crs _ _ crst) (Crs _ _ crst') = compare crst crst'
 
 data ArcGraph = AGraph [ArcPath] [Cross]
-  deriving (Eq,Show, Read, Generic)
-
-instance NFData ArcGraph
+  deriving (Eq,Show, Read, Generic, NFData)
 
 -- | Order comparison on crossings
 instance Ord ArcGraph where
@@ -449,3 +438,4 @@ hitTest rad v ag@(AGraph _ cs)
   = let mv = find (hitVertex rad v) (arcGraphVrtx ag)
         mi = findIndex (hitCross v) cs
     in (mv,mi)
+

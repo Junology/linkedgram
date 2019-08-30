@@ -34,6 +34,7 @@ import qualified Graphics.Rendering.Cairo as Cairo
 import Config
 import ArcGraph
 import ArcGraph.Common
+import ArcGraph.State
 import ArcGraph.EnhancedState
 import ArcGraph.Cairo
 import ArcGraph.TikZ
@@ -55,7 +56,7 @@ pictSize :: Num a => a
 pictSize = 80
 
 -- | Generate Pixbuf of smoothing diagrams
-genPixbufArcGraph :: ArcGraph -> Int -> IO ([DiagramState], Map.Map DiagramState Pixbuf)
+genPixbufArcGraph :: DState ds => ArcGraph -> Int -> IO ([ds], Map.Map ds Pixbuf)
 genPixbufArcGraph ag deg = do
   let states = listStates ag deg
       normAg = normalize (pictSize / 2.0) ag
@@ -68,7 +69,7 @@ genPixbufArcGraph ag deg = do
       Cairo.translate (pictSize / 2.0) (pictSize / 2.0)
       Cairo.scale 1.0 (-1.0)
       Cairo.setSourceRGB 1.0 0.0 0.0
-      drawArcGraph (smoothing cs normAg) Nothing
+      drawArcGraph (smoothing normAg cs) Nothing
     pixbuf <- pixbufNewFromSurface surface 0 0 pictSize pictSize
     modifyIORef' pixMapRef $ Map.insert cs pixbuf
   Cairo.surfaceFinish surface
@@ -111,6 +112,7 @@ showKhovanovDialog ag mayparent = do
     windowDefaultWidth := 640,
     windowDefaultHeight := 480 ]
   -- Add buttons
+  btnExport <- dialogAddButton khovanovDlg "Export" ResponseNone
   btnClose <- dialogAddButton khovanovDlg "Close" ResponseOk
 
   -- Add HBox to contain smoothing diagrams
@@ -134,45 +136,22 @@ showKhovanovDialog ag mayparent = do
   scrolledWindowSetShadowType scroll ShadowIn
   boxPackStart vbox scroll PackGrow 0
   containerAdd scroll hboxSm
-  -- Spin button to determine a quantum degree to compute
-  btnCompute <- buttonNewWithLabel "Compute"
-  btnSummary <- buttonNewWithLabel "Export Summary"
-  let maxQDeg = fromIntegral $ let (AGraph ps _) = slimAG in L.length ps
-  spinQDeg <-spinButtonNewWithRange (-maxQDeg) maxQDeg 1
-  hbtnbox <- hButtonBoxNew
-  boxPackStart hbtnbox spinQDeg PackNatural 0
-  boxPackStart hbtnbox btnCompute PackNatural 0
-  boxPackStart hbtnbox btnSummary PackNatural 0
-  boxPackStart vbox hbtnbox PackNatural 0
+  -- Spin button to input the number of positive crossings
+  let nCrs = countCross slimAG
+  spinPCrs <-spinButtonNewWithRange 0 (fromIntegral nCrs) 1
+  hlabelCrs <- labelNew (Just "Number of positive crossings")
+  checkBndry <- checkButtonNewWithLabel "Export boundaries"
+  checkSlim <- checkButtonNewWithLabel "Slim Table of Cohomology"
+  hboxConf <- hBoxNew False 3
+  boxPackStart hboxConf hlabelCrs PackNatural 0
+  boxPackStart hboxConf spinPCrs PackNatural 0
+  boxPackStart hboxConf checkBndry PackNatural 0
+  boxPackStart hboxConf checkSlim PackNatural 0
+  boxPackStart vbox hboxConf PackNatural 0
+  -- CheckButton to determine degree convention for quantum-degree.
   widgetShowAll khovanovDlg
 
-  -- Compute (unnormalized) Khovanov homology
-  btnCompute `on` buttonActivated $ do
-    -- Get q-degree
-    qdeg <- spinButtonGetValueAsInt spinQDeg
-    -- Get selected states
-    agViewListV <- V.unsafeFreeze listMVec
-    states <- fmap (V.foldl' (++) []) $ V.forM agViewListV $ \agvlv -> do
-      let (smthList,agView) = agvlv
-      mapM (listStoreGetValue smthList)
-        =<< (map head <$> iconViewGetSelectedItems agView :: IO [Int])
-
-    -- Execute the computation
-    let khResult = computeKhovanov slimAG 0 (MV.length listMVec) qdeg states
-    -- Print the result
-    forM_ (Map.toList khResult) $ \khi -> do
-      let ((i,_),KHData freeRk torsion cycleL bndryL) = khi
-      let prettyFree = "Z^{" ++ show freeRk ++ "}"
-          prettyTor = L.intercalate " (+) " $ map (\x -> "Z/" ++ show x) torsion
-      let cohPretty = case (freeRk,torsion) of
-                        (0,[]) -> "0"
-                        (0,rs) -> prettyTor
-                        (n,[]) -> prettyFree
-                        (n,rs) -> prettyTor ++ " (+) " ++ prettyFree
-      unless (cohPretty == "0") $
-        putStrLn $ "Kh^{" ++ show i ++ "," ++ show qdeg ++ "} = " ++ cohPretty
-
-  btnSummary `on` buttonActivated $ do
+  btnExport `on` buttonActivated $ do
     -- Write to the file
     mayfname <- showSaveDialog mayparent ""
     when (isJust mayfname) $ do
@@ -184,15 +163,24 @@ showKhovanovDialog ag mayparent = do
           =<< (map head <$> iconViewGetSelectedItems agView :: IO [Int])
       -- Execute computation on all quantum-degrees
       --{-- parallel version
-      let !khMap = V.foldl' Map.union Map.empty $ {- withStrategy (parTraversable  rdeepseq) $ -} V.fromList [-(round maxQDeg)..(round maxQDeg)] <&> \j -> computeKhovanov slimAG 0 (MV.length listMVec) j states
+      hasBndry <- toggleButtonGetActive checkBndry
+      let maxQDeg = let (AGraph ps _) = slimAG in L.length ps
+      let !khMap = V.foldl' Map.union Map.empty $! withStrategy (parTraversable  rdeepseq) $! V.fromList [-maxQDeg..maxQDeg] <&> \j -> computeKhovanov slimAG 0 (MV.length listMVec) j states hasBndry
       {-- non-parallel version
       khMapRef <- newIORef Map.empty
       forM_ [-(round maxQDeg)..(round maxQDeg)] $ \j ->
-        let khMapj = computeKhovanov slimAG [0..(MV.length listMVec)] j states
+        let khMapj = computeKhovanov slimAG [0..(MV.length listMVec)] j states hasBndry
         in modifyIORef' khMapRef $ Map.union khMapj
       khMap <- readIORef khMapRef
       --}
-      writeFile (fromJust mayfname) (docKhovanovTikz ag "pdftex,a4paper" "scrartcl" khMap)
+      -- modofying the degrees
+      nPCrs <- spinButtonGetValueAsInt spinPCrs
+      slimized <- toggleButtonGetActive checkSlim
+      let modif (i,j) = if slimized
+                        then (i-(nCrs-nPCrs), j-2*i+nPCrs)
+                        else (i-(nCrs-nPCrs), j-2*(nCrs-nPCrs)+nPCrs)
+      let khMap' = Map.mapKeys modif khMap
+      writeFile (fromJust mayfname) (docKhovanovTikz ag "pdftex,a4paper" "scrartcl" khMap')
 
   -- Close the dialog when "Close" is pressed
   btnClose `on` buttonActivated $ do
