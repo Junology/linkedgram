@@ -21,6 +21,9 @@ import Control.DeepSeq (NFData)
 import Control.Monad
 import Control.Monad.ST
 
+import Data.Bifunctor
+
+import qualified Data.List as L
 import qualified Data.Map.Strict as Map
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as MV
@@ -29,7 +32,25 @@ import Data.Foldable (for_)
 
 import ArcGraph
 
--- Connection of ArcPath around a crossing according to its CrsState
+-- | Type class to represent path-components in arc graphs.
+class (Ord a) => PComponent a where
+  componentAt :: ArcGraph -> a -> [ArcPath]
+  getComponents :: ArcGraph -> [a]
+
+-- | Naive instance for PComponent
+newtype ArcList = AList [Int]
+  deriving (Eq,Show,Ord,Generic,NFData)
+
+instance PComponent ArcList where
+  componentAt (AGraph ps _) (AList is)
+    = fst <$> L.filter ((`elem` is) . snd) (zip ps [0..])
+  getComponents = components
+
+-- | Recognize whether two component have common paths.
+hasIntersection :: (PComponent pc) => ArcGraph -> pc -> pc -> Bool
+hasIntersection ag x y = not $ L.null (componentAt ag x `L.intersect` componentAt ag y)
+
+-- | Connection of ArcPath around a crossing according to its CrsState
 localCross :: Cross -> (Segment,Segment)
 localCross (Crs sega segb Crossing) = (sega,segb)
 localCross (Crs (Sgmt v0 v1) (Sgmt w0 w1) Smooth0) = (Sgmt v0 w1, Sgmt v1 w0)
@@ -58,7 +79,7 @@ mkConnection p edgeMV cntRef = do
       return cnt
 
 -- Divide the indices of ArcPath into components
-components :: ArcGraph -> [[Int]]
+components :: ArcGraph -> [ArcList]
 components (AGraph ps cs) = runST $ do
   let n = length ps
   edgeMV <- MV.new n
@@ -73,5 +94,5 @@ components (AGraph ps cs) = runST $ do
     -- Connect w0 <--> w1
     mkConnection (\x -> elem w0 x || elem w1 x) edgeMV cntRef
   (justcls,nocls) <- V.ifoldl' (\xs i y -> case fst y of {Just k -> ((k,[i]):fst xs,snd xs); Nothing -> (fst xs,[i]:snd xs);}) ([],[]) <$> V.unsafeFreeze edgeMV
-  return $ Map.elems (Map.fromListWith (++) justcls) ++ nocls
+  return $ AList <$> Map.elems (Map.fromListWith (++) justcls) ++ nocls
 

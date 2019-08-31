@@ -1,3 +1,5 @@
+{-# LANGUAGE ScopedTypeVariables #-}
+
 ------------------------------------------------
 -- |
 -- Module    :  ArcGraph.TikZ
@@ -146,33 +148,33 @@ showArcGraphTikz bd ag = flip execState "" $ do
 showArcGraphTikzWithComp :: DState s => Double -> ArcGraph -> s -> String
 showArcGraphTikzWithComp bd ag st = flip execState "" $ do
   let ag'@(AGraph ps cs) = smoothing (normalize 1.0 ag) st
-  for_ (zip (components ag') (cycle $ map Just tikzColors)) $ \ipsc -> do
+  for_ (zip (getComponents ag' :: [ArcList]) (cycle $ map Just tikzColors)) $ \ipsc -> do
     let (ips,c) = ipsc
-    for_ ips $ \i ->
-      modify' (++ showArcPathTikz c (ps!!i))
+    for_ (componentAt ag' ips) $ \x ->
+      modify' (++ showArcPathTikz c x)
   modify' (++ concatMap (showCrossTikz bd) cs)
 
-showArcGraphEnhTikz :: (DState ds) => Double -> ArcGraphE ds -> String
-showArcGraphEnhTikz bd (AGraphE ag st coeffMap) = flip execState "" $ do
-  let normAG@(AGraph ps _) = normalize 1.0 ag
+showArcGraphEnhTikz :: (DState ds, PComponent pc) => Double -> ArcGraph -> ds -> MapEState pc -> String
+showArcGraphEnhTikz bd ag st (MEState coeffMap) = flip execState "" $ do
+  let normAG = normalize 1.0 ag
   modify' (++ showArcGraphTikzWithComp bd normAG st)
   forM_ (Map.toList coeffMap) $ \kv -> do
     let (comp,coeff) = kv
-        (x,y) = fromMaybe (0,0) $ findMostVrtx (\v w -> fst v < fst w) $ map (ps!!) comp
+        (x,y) = fromMaybe (0,0) $ findMostVrtx (\v w -> fst v < fst w) $ componentAt normAG comp
     -- Draw label
     modify' (++ (nodeCommand x y $ case coeff of {SLI -> "$1$"; SLX -> "$X$";}))
 
-showStateSumTikz :: (DState ds) => Double -> FreeMod Int (ArcGraphE ds) -> String
-showStateSumTikz bd vect = flip execState "" $ do
+showStateSumTikz :: (DState ds, PComponent pc) => Double -> ArcGraph -> FreeMod Int (ds, MapEState pc) -> String
+showStateSumTikz bd ag vect = flip execState "" $ do
   modify' (++"\\begin{dmath*}\n")
   forEachWithInterM drawAG (modify' (++"+")) vect
   modify' (++"\\end{dmath*}\n")
   where
-    drawAG :: (DState ds) => Int -> ArcGraphE ds -> State String ()
-    drawAG coeff agE = do
+    drawAG :: (DState ds, PComponent pc) => Int -> (ds, MapEState pc) -> State String ()
+    drawAG coeff (st,enh) = do
       modify' (++ show coeff)
       modify' (++"\\tikz{%\n")
-      modify' (++ showArcGraphEnhTikz bd agE)
+      modify' (++ showArcGraphEnhTikz bd ag st enh)
       modify' (++"}\n")
 
 flatZip :: Eq a => [a] -> [(Int,a)]
@@ -202,7 +204,7 @@ showAbGroupTeX freeRk torsions =
       | r >= 2 = "\\left(\\mathbb Z/" ++ show t ++ "\\right)^{" ++ show r ++ "}"
     torpart trs = intercalate "\\oplus " $ map markupTor (flatZip trs)
 
-showHomologyTableTeX :: Map.Map (Int,Int) (KHData ds) -> String
+showHomologyTableTeX :: (PComponent pc) => Map.Map (Int,Int) (KHData ds (MapEState pc)) -> String
 showHomologyTableTeX khMap =
   let mayRange = foldl' rangeFinder Nothing (Map.keys khMap)
   in case mayRange of
@@ -232,7 +234,7 @@ showHomologyTableTeX khMap =
           jmax' = if j > jmax then j else jmax
       in Just (imin',imax',jmin',jmax')
 
-showKHDataTikz :: (DState ds) => Int -> Int -> KHData ds -> String
+showKHDataTikz :: (DState ds, PComponent pc) => Int -> Int -> KHData ds (MapEState pc) -> String
 showKHDataTikz i j khData = flip execState "" $ do
   modify' (++ texParagraph "Homology group")
   modify' (++ "\\[\n")
@@ -240,14 +242,14 @@ showKHDataTikz i j khData = flip execState "" $ do
   modify' (++("\\cong" ++ showAbGroupTeX (rank khData) (tors khData)))
   modify' (++ "\\]\n")
   modify' (++ texParagraph "Generating cycles")
-  forM_ (cycleV khData) $ \cyc -> modify' (++ showStateSumTikz 0.15 cyc)
+  forM_ (cycleV khData) $ \cyc -> modify' (++ showStateSumTikz 0.15 (subject khData) cyc)
   case bndryV khData of
     Just bnds -> do
       modify' (++ texParagraph "Killing boundaries")
-      forM_ bnds (\bnd -> modify' (++ showStateSumTikz 0.15 bnd))
+      forM_ bnds (\bnd -> modify' (++ showStateSumTikz 0.15 (subject khData) bnd))
     Nothing -> return ()
 
-docKhovanovTikz :: (DState ds) => ArcGraph -> String -> String -> Map.Map (Int,Int) (KHData ds) -> String
+docKhovanovTikz :: (DState ds, PComponent pc) => ArcGraph -> String -> String -> Map.Map (Int,Int) (KHData ds (MapEState pc)) -> String
 docKhovanovTikz ag opts cls khMap = flip execState "" $ do
   modify' (++ texHeader opts cls)
   modify' (++ texPreamble)

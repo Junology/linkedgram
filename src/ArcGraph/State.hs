@@ -27,6 +27,7 @@ type DiagramState = [Int]
 
 class Ord a => DState a where
   degree :: ArcGraph -> a -> Int
+  getLabel :: ArcGraph -> a -> String
   smoothing :: ArcGraph -> a -> ArcGraph
   listStates :: ArcGraph -> Int -> [a]
   -- | Compute next states with sign in differential.
@@ -35,6 +36,9 @@ class Ord a => DState a where
 
 instance DState [Int] where
   degree _ = L.length
+
+  getLabel (AGraph _ cs) st
+    = map (\c -> if fst c `elem` st then '1' else '0') $ zip [0..] cs
 
   smoothing (AGraph ps cs) st
     = AGraph ps $ zipWith mkCrs [0..] cs

@@ -1,7 +1,8 @@
-{-# LANGUAGE Strict #-}
-{-# LANGUAGE StrictData #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE Strict, StrictData #-}
+{-# LANGUAGE DeriveGeneric, DeriveAnyClass #-}
 
 ------------------------------------------------
 -- |
@@ -20,8 +21,11 @@ import GHC.Generics (Generic)
 import Control.DeepSeq
 import Control.Parallel.Strategies
 
+import Control.Applicative
 import Control.Monad
 import Control.Monad.ST
+
+import Data.Bifunctor
 
 import Data.STRef
 import Data.Maybe as M
@@ -51,84 +55,77 @@ import Debug.Trace
 ---------------------
 -- Enhanced states --
 ---------------------
---{- WORK IN PROGRESS
+class (DState ds, Ord e) => Enhancement ds e where
+  listEnh :: (Alternative f) => Int -> ArcGraph -> ds -> f e
+  diffEnh :: ArcGraph -> ds -> e -> FreeMod Int (ds,e)
+
+newtype MapEState pc = MEState (Map.Map pc SL2B)
+  deriving (Eq, Ord, Show, Generic, NFData)
+
+instance (DState ds, PComponent pc) => Enhancement ds (MapEState pc) where
+  listEnh i ag st = 
+    let comps = getComponents (smoothing ag st)
+        deg' = i + L.length comps
+        subs = filter (\sub -> 2*L.length sub == deg') $ L.subsequences comps
+        mapS sub = Map.fromList $! map (\c -> (c, if elem c sub then SLI else SLX)) comps
+    in MEState <$> foldr' (\x xs -> pure (mapS x) <|> xs) empty subs
+
+  diffEnh ag st (MEState mp) = 
+    FM.sumFM $ (diffState ag st :: V.Vector (Int,ds)) >>= \dstp -> do
+      let (sign,dst) = dstp
+      return $! ((,) dst . MEState . Map.fromList) FM.@$>% Frob.tqftZ (hasIntersection ag) (Map.toList mp) (getComponents (smoothing ag dst))
+
+----------------------
+-- WORK IN PROGRESS --
+----------------------{--
 newtype BArray = BArray BA.BitArray
-  deriving (Eq, Show, Generic)
+  deriving (Eq, Ord, Show, Generic)
 
 instance NFData BArray where
-  rnf (BArray _) = ()
+  rnf (BArray x) = x `seq` ()
 
-data Enhancement t a = Enh (t a) BArray
-  deriving (Eq, Show, Generic)
-
-instance (NFData (t a)) => NFData (Enhancement t a)
-
+data BitEState pc = BEState pc BArray
+  deriving (Eq, Show, Generic, NFData)
 --}
 
-data ArcGraphE ds = AGraphE {
+data ArcGraphE ds e = AGraphE {
   arcGraph :: ArcGraph,
   state :: ds,
-  enhLabel :: Map.Map [Int] SL2B
+  enhancement :: e
   } deriving (Eq,Show,Generic,NFData)
 
--- | Lexicographical order on ArcGraphE
-instance (DState ds) => Ord (ArcGraphE ds) where
-  compare (AGraphE _ st coeff) (AGraphE _ st' coeff')
-    = case compare st st' of
-        LT -> LT
-        GT -> GT
-        EQ -> compare coeff coeff'
-
-enhancements :: (DState ds) => Int -> ArcGraph -> ds -> V.Vector (Map.Map [Int] SL2B)
-enhancements deg ag st = runST $ do
-  let comps = components (smoothing ag st)
+enhancements :: (DState ds, PComponent pc, Alternative f) => Int -> ArcGraph -> ds -> f (Map.Map pc SL2B)
+enhancements deg ag st =
+  let comps = getComponents (smoothing ag st)
       deg' = deg + L.length comps
-      subis = zip [0..] $ filter (\sub -> 2*L.length sub == deg') $ L.subsequences comps
-  mapMV <- MV.unsafeNew (length subis) -- Do not need to initialize the memory
-  for_ subis $ \subi -> do
-    let (i,sub) = subi
-    MV.write mapMV i $ L.foldl' (\xs y -> Map.insert y (if elem y sub then SLI else SLX) xs) Map.empty comps
-  V.unsafeFreeze mapMV
+      subs = filter (\sub -> 2*L.length sub == deg') $ L.subsequences comps
+      mapS sub = Map.fromList $! map (\c -> (c, if elem c sub then SLI else SLX)) comps
+  in foldr' (\x xs -> pure (mapS x) <|> xs) empty subs
 
-enhancedStates :: (DState ds) => Int -> ArcGraph -> ds -> V.Vector (ArcGraphE ds)
+enhancedStates :: (DState ds, Enhancement ds e, Alternative f) => Int -> ArcGraph -> ds -> f (ArcGraphE ds e)
 enhancedStates deg ag st
-  = V.map (AGraphE ag st) $ enhancements deg ag st
-
-enhancedStatesL :: (DState ds) => Int -> ArcGraph -> ds -> [ArcGraphE ds]
-enhancedStatesL deg ag st
-  = V.foldr' (\x xs -> (AGraphE ag st x):xs) [] $ enhancements deg ag st
-
-hasIntersection :: Eq a => [a] -> [a] -> Bool
-hasIntersection x y = not $ L.null (x `L.intersect` y)
-
-differential :: (DState ds) => ArcGraphE ds -> FreeMod Int (ArcGraphE ds)
-differential (AGraphE ag st coeffMap) =
-  let dStVec = diffState ag st
-  in FM.sumFM $ runST $ do
-    imageMV <- MV.unsafeNew (V.length dStVec)
-    for_ [0..(V.length dStVec -1)] $ \i -> do
-      let (sign,dSt) = dStVec V.! i
-          imageAg = AGraphE ag dSt FM.@$>% Map.fromList FM.@$>% Frob.tqftZ hasIntersection (Map.toList coeffMap) (components (smoothing ag dSt))
-      MV.write imageMV i (sign FM.@*% imageAg)
-    V.unsafeFreeze imageMV
+  = AGraphE ag st <$> listEnh deg ag st
 
 ----------------------------------------------------------
 -- The computation of (unnormalized) Khovanov homology
 -----------------------------------------------------------
 -- | The type to carry the data of Khovanov homologies
-data KHData ds = KHData {
+data KHData ds e = KHData {
+  subject :: ArcGraph,
   rank :: Int,
   tors :: [Int],
-  cycleV :: [FreeMod Int (ArcGraphE ds)],
-  bndryV :: Maybe [FreeMod Int (ArcGraphE ds)] }
+  cycleV :: [FreeMod Int (ds, e)],
+  bndryV :: Maybe [FreeMod Int (ds, e)] }
   deriving (Show,Eq,Generic, NFData)
 
 vecToSum :: (Integral a, Num a, LA.Element a, Ord b) => [b] -> LA.Vector a -> FreeMod Int b
 vecToSum bs v = sumFM $! zipWith (@*@%) (fromIntegral <$!> LA.toList v) bs
 
-cohomologyToKH :: (DState ds) => [ArcGraphE ds] -> Bool -> IntHomology -> KHData ds
-cohomologyToKH basis hasBndry hdata =
-  KHData {
+cohomologyToKH :: (DState ds, Enhancement ds e) => ArcGraph -> [(ds, e)] -> Bool -> IntHomology -> KHData ds e
+cohomologyToKH ag basis hasBndry hdata =
+  let basisAGE = uncurry (AGraphE ag) <$> basis
+  in KHData {
+    subject = ag,
     rank = L.length (freeCycs hdata),
     tors = fmap (fromIntegral . snd) (torCycs hdata),
     cycleV = fmap (vecToSum basis) (freeCycs hdata ++ fmap fst (torCycs hdata)),
@@ -137,72 +134,26 @@ cohomologyToKH basis hasBndry hdata =
              else Nothing }
 
 -- | Compute Khovanov homology for given range of cohomological degrees and a given quantum-degree
-computeKhovanov :: (DState ds) => ArcGraph -> Int -> Int -> Int -> [ds] -> Bool -> Map.Map (Int,Int) (KHData ds)
+computeKhovanov :: (DState ds, Enhancement ds e) => ArcGraph -> Int -> Int -> Int -> [ds] -> Bool -> Map.Map (Int,Int) (KHData ds e)
 computeKhovanov ag minhdeg maxhdeg qdeg states hasBndry =
   let numCrs = countCross ag
       minhdeg' = max 0 (minhdeg-1)
       maxhdeg' = min numCrs (maxhdeg+1)
       hdegsNHD = [minhdeg' .. maxhdeg']
       slimAG = slimCross ag
-      basis i = L.concatMap (enhancedStatesL (qdeg-i) slimAG) (filter ((==i). degree slimAG) states)
+      basis i = L.concatMap (\st -> (,) st <$> listEnh (qdeg-i) slimAG st) (filter ((==i). degree slimAG) states)
       basisMap = Map.fromSet basis (Set.fromList hdegsNHD)
       diffs = flip (parMap rdeepseq) [minhdeg'..maxhdeg'-1] $ \i ->
         let sbasis = basisMap Map.! i
             tbasis = basisMap Map.! (i+1)
-        in force $ if null sbasis || null tbasis
-                   then (length tbasis LA.>< length sbasis) []
-                   else matiDataToLA $ genMatrix differential sbasis tbasis
+        in force $! if null sbasis || null tbasis
+                    then (length tbasis LA.>< length sbasis) []
+                    else matiDataToLA $ genMatrix (uncurry (diffEnh ag)) sbasis tbasis
   in if maxhdeg' <= minhdeg'
      then -- The case where there is no crossing point;
-       Map.mapKeysMonotonic (\i -> (i,qdeg)) $ Map.map (\v -> KHData (L.length v) [] (fmap (1@*@%) v) Nothing) basisMap
+       Map.mapKeysMonotonic (\i -> (i,qdeg)) $ Map.map (\v -> KHData slimAG (L.length v) [] (fmap (1@*@%) v) Nothing) basisMap
      else -- The case where there is at least one crossing point;
-       let hdata = force $ intHomology (L.head diffs) (L.tail diffs)
-           hdataMap = Map.fromList $ filter (\hdti -> fst hdti >= minhdeg && fst hdti <= maxhdeg && not (null (freeCycs (snd hdti)) && null (torCycs (snd hdti))) ) $ zip [minhdeg'..maxhdeg'] hdata
-           khMap = flip Map.mapWithKey hdataMap $ \i hdt -> cohomologyToKH (basisMap Map.! i) hasBndry hdt
+       let !hdata = force $ intHomology (L.head diffs) (L.tail diffs)
+           hdataMap = Map.fromList $ filter (\hdti -> fst hdti >= minhdeg && fst hdti <= maxhdeg && not (null (freeCycs (snd hdti)) && null (torCycs (snd hdti))) ) $ zip [minhdeg..maxhdeg] hdata
+           khMap = flip Map.mapWithKey hdataMap $ \i hdt -> cohomologyToKH slimAG (basisMap Map.! i) hasBndry hdt
        in Map.mapKeysMonotonic (\i -> (i,qdeg {- -2*i -})) khMap
-
--- | Compute Khovanov homology for given range of cohomological degrees and a given quantum-degree
-computeKhovanov' :: (DState ds) => ArcGraph -> Int -> Int -> Int -> [ds] -> Bool -> Map.Map (Int,Int) (KHData ds)
-computeKhovanov' ag minhdeg maxhdeg qdeg states hasBndry  =
-  let numCrs = countCross ag
-      hdegsNHD = [max 0 (minhdeg-1) .. min numCrs (maxhdeg+1)]
-      slimAG = slimCross ag
-  in runST $ do
-    -- Define STRef to write the result
-    resultMapRef <- newSTRef Map.empty
-    -- Compute basis
-    baseMVec <- MV.replicate (numCrs + 2) []
-    forM_ [0..numCrs] $ \i -> do
-      -- Get selected states at coh.degree i
-      let statesi = filter ((==i). degree slimAG) states
-      MV.write baseMVec i $ L.concatMap (enhancedStatesL (qdeg-i) slimAG) statesi
-    -- Compute kernels and images of differentials
-    cycleMV <- MV.replicate (numCrs+1) ([] :: [LA.Vector LA.Z])
-    bndryMV <- MV.replicate (numCrs+1) ([] :: [LA.Vector LA.Z])
-    diagcMV <- MV.replicate (numCrs+1) ([] :: [Int])
-    forM_ hdegsNHD $ \i -> do
-      base0 <- MV.read baseMVec i
-      base1 <- MV.read baseMVec (i+1)
-      if L.null base1
-        then MV.write cycleMV i $ LA.toColumns (LA.ident (L.length base0))
-        else unless (L.null base0) $ do
-          let diffMat = genMatrix differential base0 base1
-          let (dvec,ker,im) = kerImOf $ matiDataToLA diffMat
-          MV.write cycleMV i ker
-          MV.write bndryMV (i+1) im
-          MV.write diagcMV (i+1) $ map fromIntegral $ LA.toList dvec
-    -- Compute Homology at degree (i,qdeg)
-    forM_ [minhdeg..maxhdeg] $ \i ->
-      when (i <= numCrs) $ do
-        base <- MV.read baseMVec i
-        cycleL <- MV.read cycleMV i
-        bndryL <- MV.read bndryMV i
-        let freeRk = length cycleL - length bndryL
-        tor <- L.filter (/=1) <$> MV.read diagcMV i
-        when (freeRk > 0 || not (L.null tor)) $ do
-          let cycs' = map (map fromIntegral . LA.toList) cycleL
-          let bnds' = map (map fromIntegral . LA.toList) bndryL
-          let (cycs'',bnds'') = (cycs' L.\\ bnds', bnds' L.\\ cycs')
-          modifySTRef' resultMapRef $ Map.insert (i,qdeg) $
-            KHData freeRk tor (map (flip zipSum base) cycs'') (if hasBndry then (Just $ map (flip zipSum base) bnds'') else Nothing)
-    readSTRef resultMapRef

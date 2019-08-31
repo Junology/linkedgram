@@ -34,6 +34,7 @@ import qualified Graphics.Rendering.Cairo as Cairo
 import Config
 import ArcGraph
 import ArcGraph.Common
+import ArcGraph.Component
 import ArcGraph.State
 import ArcGraph.EnhancedState
 import ArcGraph.Cairo
@@ -77,7 +78,7 @@ genPixbufArcGraph ag deg = do
   return (states, pixMap)
 
 -- | Create IconView containing smoothings of a designated degree
-createArcGraphView :: ArcGraph -> Int -> IO (ListStore DiagramState,IconView)
+createArcGraphView :: (DState ds) => ArcGraph -> Int -> IO (ListStore ds,IconView)
 createArcGraphView ag deg = do
   iconview <- iconViewNew
   (diagSt,pixMap) <- genPixbufArcGraph ag deg
@@ -85,9 +86,7 @@ createArcGraphView ag deg = do
   let colAGPixbuf = makeColumnIdPixbuf 1
       colLabel = makeColumnIdString 2
   treeModelSetColumn smoothList colAGPixbuf (pixMap Map.!)
-  treeModelSetColumn smoothList colLabel $ \st ->
-    let (AGraph _ cs') = ag
-    in map (\c -> if fst c `elem` st then '1' else '0') $ zip [0..] cs'
+  treeModelSetColumn smoothList colLabel (getLabel ag)
   set iconview [
     iconViewModel := Just smoothList,
     iconViewTextColumn := colLabel,
@@ -119,7 +118,7 @@ showKhovanovDialog ag mayparent = do
   hboxSm <- hBoxNew True 0
   listMVec <- MV.unsafeNew (countCross slimAG+1)
   forM_ [0..countCross slimAG] $ \i -> do
-    (smthList,arcGraphView) <- createArcGraphView slimAG i
+    (smthList,arcGraphView) <- createArcGraphView slimAG i :: IO (ListStore DiagramState, IconView)
     set arcGraphView [
       iconViewSelectionMode := SelectionMultiple,
       iconViewColumns := 1 ]
@@ -162,24 +161,18 @@ showKhovanovDialog ag mayparent = do
         mapM (listStoreGetValue smthList)
           =<< (map head <$> iconViewGetSelectedItems agView :: IO [Int])
       -- Execute computation on all quantum-degrees
-      --{-- parallel version
       hasBndry <- toggleButtonGetActive checkBndry
       let maxQDeg = let (AGraph ps _) = slimAG in L.length ps
-      let !khMap = V.foldl' Map.union Map.empty $! withStrategy (parTraversable  rdeepseq) $! V.fromList [-maxQDeg..maxQDeg] <&> \j -> computeKhovanov slimAG 0 (MV.length listMVec) j states hasBndry
-      {-- non-parallel version
-      khMapRef <- newIORef Map.empty
-      forM_ [-(round maxQDeg)..(round maxQDeg)] $ \j ->
-        let khMapj = computeKhovanov slimAG [0..(MV.length listMVec)] j states hasBndry
-        in modifyIORef' khMapRef $ Map.union khMapj
-      khMap <- readIORef khMapRef
-      --}
+      let khMap :: Map.Map (Int,Int) (KHData DiagramState (MapEState ArcList))
+          !khMap = V.foldl' Map.union Map.empty $! withStrategy (parTraversable  rdeepseq) $! V.fromList [-maxQDeg..maxQDeg] <&> \j -> computeKhovanov slimAG 0 (MV.length listMVec) j states hasBndry
       -- modofying the degrees
       nPCrs <- spinButtonGetValueAsInt spinPCrs
       slimized <- toggleButtonGetActive checkSlim
       let modif (i,j) = if slimized
                         then (i-(nCrs-nPCrs), j-2*i+nPCrs)
                         else (i-(nCrs-nPCrs), j-2*(nCrs-nPCrs)+nPCrs)
-      let khMap' = Map.mapKeys modif khMap
+      let khMap' :: Map.Map (Int,Int) (KHData DiagramState (MapEState ArcList))
+          khMap' = Map.mapKeys modif khMap
       writeFile (fromJust mayfname) (docKhovanovTikz ag "pdftex,a4paper" "scrartcl" khMap')
 
   -- Close the dialog when "Close" is pressed

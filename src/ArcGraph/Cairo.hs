@@ -30,6 +30,7 @@ import Numeric.Algebra.Frobenius
 
 import ArcGraph
 import ArcGraph.Common
+import ArcGraph.Component
 import ArcGraph.State
 import ArcGraph.EnhancedState
 
@@ -103,8 +104,8 @@ drawArcGraph ag@(AGraph ps cs) mayrgb = do
     Just (r,g,b) -> drawArcGraphVrtx r g b ag
     Nothing -> return ()
 
-drawArcGraphEnh :: (DState ds) => ArcGraphE ds -> Double -> Double -> Double -> Double -> Cairo.Render ()
-drawArcGraphEnh (AGraphE ag@(AGraph ps _) st coeffMap) sz r g b = do
+drawArcGraphEnh :: (DState ds, PComponent pc) => ArcGraphE ds (MapEState pc) -> Double -> Double -> Double -> Double -> Cairo.Render ()
+drawArcGraphEnh (AGraphE ag@(AGraph ps _) st (MEState coeffMap)) sz r g b = do
   -- Draw arc graph
   drawArcGraph (smoothing ag st) Nothing
   -- Draw labels in the enhanced state
@@ -113,13 +114,13 @@ drawArcGraphEnh (AGraphE ag@(AGraph ps _) st coeffMap) sz r g b = do
   Cairo.setFontSize sz
   forM_ (Map.toList coeffMap) $ \kv -> do
     let (comp,coeff) = kv
-        (x,y) = fromMaybe (0,0) $ findMostVrtx (\v w -> fst v < fst w) $ map (ps!!) comp
+        (x,y) = fromMaybe (0,0) $ findMostVrtx (\v w -> fst v < fst w) $ componentAt ag comp
     -- Draw label
     Cairo.moveTo x y
     Cairo.showText $ case coeff of {SLI -> "1"; SLX -> "X";}
   Cairo.restore
 
-drawStateSum :: (DState ds) => FreeMod Int (ArcGraphE ds) -> Double -> Double -> Double -> Cairo.Render ()
+drawStateSum :: (DState ds, PComponent pc) => FreeMod Int (ArcGraphE ds (MapEState pc)) -> Double -> Double -> Double -> Cairo.Render ()
 drawStateSum vect r g b = do
   Cairo.save
   Cairo.setFontSize 20
