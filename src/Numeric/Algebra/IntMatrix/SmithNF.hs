@@ -10,7 +10,7 @@
 
 module Numeric.Algebra.IntMatrix.SmithNF where
 
-import Control.Monad (when, forM_, guard)
+import Control.Monad (when, unless, forM_, guard, join)
 import Control.Monad.ST
 import Control.Monad.Loops (whileM_, whileJust_)
 
@@ -43,10 +43,10 @@ preSmithNFST stMatUL stMatA stMatURt = do
     stMatURtex <- thawMatrix =<< extractMatrix stMatURt (FromRow diagSz) AllCols
     -- Compute the Hermite normal forms of the extracted submatrix and of the transpose of the result.
     --hnfLLLST stMatULex stMatAex
-    hermiteNFST stMatULex stMatAex
+    join $ hermiteNFST <$> newMatrix 0 0 0 <*> pure stMatULex <*> pure stMatAex
     stMatAext <- thawMatrix =<< (LA.tr' <$> freezeMatrix stMatAex)
     --hnfLLLST stMatURtex stMatAext
-    hermiteNFST stMatURtex stMatAext
+    join $ hermiteNFST <$> newMatrix 0 0 0 <*> pure stMatURtex <*> pure stMatAext
     -- Write out the result
     setMatrix stMatA diagSz diagSz =<< (LA.tr' <$> freezeMatrix stMatAext)
     setMatrix stMatUL diagSz 0 =<< freezeMatrix stMatULex
@@ -82,7 +82,7 @@ normalizeST stMatUL stMatA stMatURt = do
     normalizeST' stMatULex stMatD stMatURtex = do
       b <- (isHeadGCD . LA.takeDiag) <$> freezeMatrix stMatD
       n <- liftSTMatrix LA.rows stMatD
-      when (not b) $ do
+      unless b $ do
         forM_ [1..(n-1)] $ \i -> do
           readMatrix stMatD i i >>= writeMatrix stMatD i 0
           rowOper (AXPY 1 i 0 AllCols) stMatURtex

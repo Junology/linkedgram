@@ -34,12 +34,17 @@ typedef struct matrix_t_ {
     size_t r, c, Xr, Xc;
 } matrix_type;
 
+/* Matrices of size 0 */
+#define MATRIX_ZEROROW(c) ((matrix_type){NULL, 0, (c), 0, 0})
+#define MATRIX_ZEROCOL(r) ((matrix_type){NULL, (r), 0, 0, 0})
+
 /*
  * Access to entries of a matrix.
  * The first parameter m must be of type matrix_type.
  */
 #define MATRIX_AT(m,i,j) ((m).p[(i)*(m).Xr + (j)*(m).Xc])
 #define MATRIX_UDAT(m,i,j) ((m).p[((m).r-i-1)*(m).Xr + (j)*(m).Xc])
+#define MATRIX_RLAT(m,i,j) ((m).p[(i)*(m).Xr + ((m).c-j-1)*(m).Xc])
 
 /*
  * Swap the contents of two integer variables.

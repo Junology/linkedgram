@@ -11,6 +11,6 @@
 
 #include "common.h"
 
-void smithNF(matrix_type * restrict u, matrix_type * restrict m, matrix_type * restrict v);
+void smithNF(matrix_type * restrict u, matrix_type * restrict uinv, matrix_type * restrict m, matrix_type * restrict v, matrix_type * restrict vinv);
 
 void smithRep(matrix_type * restrict a, matrix_type * restrict m, matrix_type * restrict b);

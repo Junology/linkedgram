@@ -70,10 +70,10 @@ instance (DState ds, PComponent pc) => Enhancement ds (MapEState pc) where
         mapS sub = Map.fromList $! map (\c -> (c, if elem c sub then SLI else SLX)) comps
     in MEState <$> foldr' (\x xs -> pure (mapS x) <|> xs) empty subs
 
-  diffEnh ag st (MEState mp) = 
+  diffEnh ag st (MEState mp) =
     FM.sumFM $ (diffState ag st :: V.Vector (Int,ds)) >>= \dstp -> do
       let (sign,dst) = dstp
-      return $! ((,) dst . MEState . Map.fromList) FM.@$>% Frob.tqftZ (hasIntersection ag) (Map.toList mp) (getComponents (smoothing ag dst))
+      return $! ((,) dst . MEState . Map.fromList) FM.@$>% sign FM.@*% Frob.tqftZ (hasIntersection ag) (Map.toList mp) (getComponents (smoothing ag dst))
 
 ----------------------
 -- WORK IN PROGRESS --
@@ -101,10 +101,6 @@ enhancements deg ag st =
       subs = filter (\sub -> 2*L.length sub == deg') $ L.subsequences comps
       mapS sub = Map.fromList $! map (\c -> (c, if elem c sub then SLI else SLX)) comps
   in foldr' (\x xs -> pure (mapS x) <|> xs) empty subs
-
-enhancedStates :: (DState ds, Enhancement ds e, Alternative f) => Int -> ArcGraph -> ds -> f (ArcGraphE ds e)
-enhancedStates deg ag st
-  = AGraphE ag st <$> listEnh deg ag st
 
 ----------------------------------------------------------
 -- The computation of (unnormalized) Khovanov homology

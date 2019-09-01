@@ -34,6 +34,18 @@ void swap_rows(size_t i1, size_t i2, matrix_type * restrict mat)
 
     #pragma omp parallel for
     for (size_t j = 0; j < mat->c; ++j) {
+        SWAP_UNSAFE( MATRIX_AT(*mat,i1,j), MATRIX_AT(*mat,i2,j) );
+    }
+}
+
+/*! Swap two rows with upside-down indexing. */
+static inline
+void swap_rows_ud(size_t i1, size_t i2, matrix_type * restrict mat)
+{
+    if (i1 == i2) return;
+
+    #pragma omp parallel for
+    for (size_t j = 0; j < mat->c; ++j) {
         SWAP_UNSAFE( MATRIX_UDAT(*mat,i1,j), MATRIX_UDAT(*mat,i2,j) );
     }
 }
@@ -44,12 +56,34 @@ void scalar_row(size_t i, target_type s, matrix_type * restrict mat)
 {
     #pragma omp parallel for
     for (size_t j = 0; j < mat->c; ++j)
+        MATRIX_AT(*mat, i, j) *= s;
+}
+
+/*! Scalar multiple of a row with upside-down indexing. */
+static inline
+void scalar_row_ud(size_t i, target_type s, matrix_type * restrict mat)
+{
+    #pragma omp parallel for
+    for (size_t j = 0; j < mat->c; ++j)
         MATRIX_UDAT(*mat, i, j) *= s;
 }
 
 /*! Add scalar multiple of a row to another. */
 static inline
 void axpy_rows(target_type s, size_t i_src, size_t i_dest, matrix_type * restrict mat )
+{
+    #pragma omp parallel for
+    for (size_t j = 0; j < mat->c; ++j) {
+        target_type_huge aux = MATRIX_AT(*mat, i_src,j);
+        aux *= s;
+        aux += MATRIX_AT(*mat, i_dest, j);
+        MATRIX_AT(*mat, i_dest, j) = aux;
+    }
+}
+
+/*! Add scalar multiple of a row to another with upside-down indexing. */
+static inline
+void axpy_rows_ud(target_type s, size_t i_src, size_t i_dest, matrix_type * restrict mat )
 {
     #pragma omp parallel for
     for (size_t j = 0; j < mat->c; ++j) {
@@ -72,7 +106,19 @@ void swap_columns(size_t j1, size_t j2, matrix_type * restrict mat)
 
     #pragma omp parallel for
     for (size_t i = 0; i < mat->r; ++i) {
-        SWAP_UNSAFE( MATRIX_UDAT(*mat,i,j1), MATRIX_UDAT(*mat,i,j2) );
+        SWAP_UNSAFE( MATRIX_AT(*mat,i,j1), MATRIX_AT(*mat,i,j2) );
+    }
+}
+
+/*! Swap two columns of a matrix with right-to-left indexing. */
+static inline
+void swap_columns_rl(size_t j1, size_t j2, matrix_type * restrict mat)
+{
+    if (j1 == j2) return;
+
+    #pragma omp parallel for
+    for (size_t i = 0; i < mat->r; ++i) {
+        SWAP_UNSAFE( MATRIX_RLAT(*mat,i,j1), MATRIX_RLAT(*mat,i,j2) );
     }
 }
 
@@ -82,7 +128,16 @@ void scalar_column(size_t j, target_type s, matrix_type * restrict mat)
 {
     #pragma omp parallel for
     for (size_t i = 0; i < mat->r; ++i)
-        MATRIX_UDAT(*mat, i, j) *= s;
+        MATRIX_AT(*mat, i, j) *= s;
+}
+
+/*! Scalar multiple of a column with right-to-left indexing. */
+static inline
+void scalar_column_rl(size_t j, target_type s, matrix_type * restrict mat)
+{
+    #pragma omp parallel for
+    for (size_t i = 0; i < mat->r; ++i)
+        MATRIX_RLAT(*mat, i, j) *= s;
 }
 
 /*! Add scalar multiple of a row to another. */
@@ -91,10 +146,23 @@ void axpy_columns(target_type s, size_t j_src, size_t j_dest, matrix_type * rest
 {
     #pragma omp parallel for
     for (size_t i = 0; i < mat->r; ++i) {
-        target_type_huge aux = MATRIX_UDAT(*mat, i, j_src);
+        target_type_huge aux = MATRIX_AT(*mat, i, j_src);
         aux *= s;
-        aux += MATRIX_UDAT(*mat, i, j_dest);
-        MATRIX_UDAT(*mat, i, j_dest) = aux;
+        aux += MATRIX_AT(*mat, i, j_dest);
+        MATRIX_AT(*mat, i, j_dest) = aux;
+    }
+}
+
+/*! Add scalar multiple of a row to another with right-to-left indexing. */
+static inline
+void axpy_columns_rl(target_type s, size_t j_src, size_t j_dest, matrix_type * restrict mat )
+{
+    #pragma omp parallel for
+    for (size_t i = 0; i < mat->r; ++i) {
+        target_type_huge aux = MATRIX_RLAT(*mat, i, j_src);
+        aux *= s;
+        aux += MATRIX_RLAT(*mat, i, j_dest);
+        MATRIX_RLAT(*mat, i, j_dest) = aux;
     }
 }
 

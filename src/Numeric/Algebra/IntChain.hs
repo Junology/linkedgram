@@ -19,6 +19,8 @@ module Numeric.Algebra.IntChain
 import GHC.Generics (Generic, Generic1)
 import Control.DeepSeq (NFData, NFData1, force)
 
+import Control.Parallel.Strategies
+
 import Control.Monad
 import Control.Monad.ST
 
@@ -109,13 +111,7 @@ intHomology headD tailDs =
       let rk = length (invFactor smith)
           newcyc = drop rk $ LA.toColumns (basisS smith)
           (ones,tors) = span (==1) (invFactor smith)
-          torcycs = LA.toColumns $ LA.dropColumns (length ones) (basisT smith)
-          !bnds = force $! runST $ do
-            stBT <- LA.thawMatrix (LA.tr' (basisT smith))
-            forM_ [0 .. length (invFactor smith) - 1] $ \i -> do
-              let r = invFactor smith !! i
-              when (r /= 1) $ LA.rowOper (LA.SCAL r (LA.Row i) LA.AllCols) stBT
-            flip hermiteNFST stBT =<< LA.newMatrix 0 rk 0
-            LA.toRows <$!> LA.unsafeFreezeMatrix stBT
+          !torcycs = LA.toColumns $ LA.dropColumns (length ones) (basisT smith)
+          !bnds = zipWith (\r v -> if r == 1 then v else LA.scale r v) (invFactor smith) (LA.toColumns (basisT smith)) `using` (parList (rparWith rdeepseq))
       in (IntHomology [] (zip torcycs tors) bnds, hdata {freeCycs = newcyc})
     combine coker hdata ts = ts <|> pure hdata {freeCycs = LA.toColumns coker}

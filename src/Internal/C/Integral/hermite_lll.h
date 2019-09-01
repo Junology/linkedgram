@@ -9,5 +9,4 @@
 
 #include "common.h"
 
-void hermiteNF_LLL_partial(size_t n, matrix_type * restrict u[*], matrix_type * restrict m, size_t k);
-void hermiteNF_LLL(size_t n, matrix_type * restrict u[*], matrix_type * restrict m);
+void hermiteNF_LLL(size_t n_u, matrix_type * restrict u[*], size_t n_uinv, matrix_type * restrict uinv[*], matrix_type * restrict m);

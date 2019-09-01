@@ -12,10 +12,12 @@
 #include "hermite_lll.h"
 #include "smith.h"
 
+#include <stdlib.h>
+
 /* / Debug
 #include <stdio.h>
+#define DEBUG_MESSAGE fprintf(stderr, "%s:%d\n", __func__, __LINE__)
 // */
-#include <stdlib.h>
 
 typedef struct mat_index_t_ {
     size_t i,j;
@@ -82,9 +84,10 @@ size_t find_first_zero_diag(const matrix_type *mat)
  * Eliminate all the off-diagonal entries by applying LLL-based algorithm recursively.
  */
 static
-void elim_offdiag(matrix_type * restrict u, matrix_type * restrict m, matrix_type * restrict v)
+void elim_offdiag(matrix_type * restrict u, matrix_type * restrict uinv, matrix_type * restrict m, matrix_type * restrict v, matrix_type * restrict vinv)
 {
-    matrix_type u_iter = *u, m_iter = *m;
+    matrix_type u_iter = *u, uinv_iter = *uinv;
+    matrix_type m_iter = *m;
 
     /* Iterator reffering to transposed v */
     matrix_type vt_iter = {
@@ -95,10 +98,24 @@ void elim_offdiag(matrix_type * restrict u, matrix_type * restrict m, matrix_typ
         .Xc = v->Xr
     };
 
+    matrix_type vinvt_iter = {
+        .p = vinv->p,
+        .r = vinv->c,
+        .c = vinv->r,
+        .Xr = vinv->Xc,
+        .Xc = vinv->Xr
+    };
+
     while(m_iter.r > 0 && m_iter.c > 0) {
-        hermiteNF_LLL(1, (matrix_type*[]){&u_iter}, &m_iter);
+        hermiteNF_LLL(
+            1, (matrix_type*[]){&u_iter},
+            1, (matrix_type*[]){&uinv_iter},
+            &m_iter );
         transpose(&m_iter);
-        hermiteNF_LLL(1, (matrix_type*[]){&vt_iter}, &m_iter);
+        hermiteNF_LLL(
+            1, (matrix_type*[]){&vt_iter},
+            1, (matrix_type*[]){&vinvt_iter},
+            &m_iter );
         transpose(&m_iter);
 
         size_t k = max_diagonal(&m_iter);
@@ -107,30 +124,40 @@ void elim_offdiag(matrix_type * restrict u, matrix_type * restrict m, matrix_typ
         m_iter.r -= k;
         m_iter.c -= k;
         m_iter.p += k * (m_iter.Xr + m_iter.Xc);
-        u_iter.r -= k;
-        u_iter.p += k * u_iter.Xr;
-        vt_iter.r -= k;
-        vt_iter.p += k * vt_iter.Xr;
+        u_iter.c -= k;
+        u_iter.p += k * u_iter.Xc;
+        uinv_iter.r -= k;
+        uinv_iter.p += k * uinv_iter.Xr;
+        vt_iter.c -= k;
+        vt_iter.p += k * vt_iter.Xc;
+        vinvt_iter.r -= k;
+        vinvt_iter.p += k * vinvt_iter.Xr;
     }
 }
 
 /*!
  * Compute the Smith normal form of a given matrix.
  */
-void smithNF(matrix_type * restrict u, matrix_type * restrict m, matrix_type * restrict v)
+void smithNF(matrix_type * restrict u, matrix_type * restrict uinv, matrix_type * restrict m, matrix_type * restrict v, matrix_type * restrict vinv)
 {
-    matrix_type u_iter = *u, m_iter = *m, v_iter = *v;
+    matrix_type u_iter = u ? *u : MATRIX_ZEROROW(m->r);
+    matrix_type uinv_iter = uinv ? *uinv : MATRIX_ZEROCOL(m->r);
+    matrix_type m_iter = *m;
+    matrix_type v_iter = v ? *v : MATRIX_ZEROCOL(m->c);
+    matrix_type vinv_iter = vinv ? *vinv : MATRIX_ZEROROW(m->c);
 
-    elim_offdiag(&u_iter, &m_iter, &v_iter);
+    elim_offdiag(&u_iter, &uinv_iter, &m_iter, &v_iter, &vinv_iter);
 
     // Trim the matrix into square
     if (m_iter.r > m_iter.c) {
         m_iter.r = m_iter.c;
-        u_iter.r = m_iter.c;
+        u_iter.c = m_iter.c;
+        uinv_iter.r = m_iter.c;
     }
     else {
         m_iter.c = m_iter.r;
-        v_iter.c = m_iter.r;
+        v_iter.r = m_iter.r;
+        vinv_iter.c = m_iter.r;
     }
 
     // Ignore all the diagonal entries == 1
@@ -143,10 +170,11 @@ void smithNF(matrix_type * restrict u, matrix_type * restrict m, matrix_type * r
     m_iter.r -= k;
     m_iter.c -= k;
     m_iter.p += k * (m_iter.Xr + m_iter.Xc);
-    u_iter.r -= k;
-    u_iter.p += k * u_iter.Xr;
-    v_iter.c -= k;
-    v_iter.p += k * v_iter.Xc;
+
+    u_iter.p += k * u_iter.Xc;
+    uinv_iter.p += k * uinv_iter.Xr;
+    v_iter.p += k * v_iter.Xr;
+    vinv_iter.p += k * vinv_iter.Xc;
 
     // Ignore the null space
     k = find_first_zero_diag(&m_iter);
@@ -157,28 +185,37 @@ void smithNF(matrix_type * restrict u, matrix_type * restrict m, matrix_type * r
 
     m_iter.r = k;
     m_iter.c = k;
-    u_iter.r = k;
-    v_iter.c = k;
+    u_iter.c = k;
+    uinv_iter.r = k;
+    v_iter.r = k;
+    vinv_iter.c = k;
 
     /* / Debug
     fprintf( stderr, "%zu >< %zu, %"PRId64"\n", m_iter.r, m_iter.c, *(m_iter.p));
     // */
 
     while (m_iter.r > 0) {
+        #pragma omp parallel for
         for (size_t i = 1; i < m_iter.r; ++i) {
             MATRIX_AT(m_iter, i, 0) = MATRIX_AT(m_iter, i, i);
-            axpy_columns(1, i, 0, &v_iter);
+            axpy_rows(-1, 0, i, &v_iter);
+            axpy_columns(1, i, 0, &vinv_iter);
         }
-        elim_offdiag(&u_iter, &m_iter, &v_iter);
+
+        elim_offdiag(&u_iter, &uinv_iter, &m_iter, &v_iter, &vinv_iter);
 
         // update iterators
         --m_iter.r;
         --m_iter.c;
         m_iter.p += (m_iter.Xr + m_iter.Xc);
-        --u_iter.r;
-        u_iter.p += u_iter.Xr;
-        --v_iter.c;
-        v_iter.p += v_iter.Xc;
+        --u_iter.c;
+        u_iter.p += u_iter.Xc;
+        --uinv_iter.r;
+        uinv_iter.p += uinv_iter.Xr;
+        --v_iter.r;
+        v_iter.p += v_iter.Xr;
+        --vinv_iter.c;
+        vinv_iter.p += vinv_iter.Xc;
     }
 }
 
@@ -200,60 +237,70 @@ void smithNF(matrix_type * restrict u, matrix_type * restrict m, matrix_type * r
  */
 void smithRep(matrix_type * restrict a, matrix_type * restrict m, matrix_type * restrict b)
 {
-    // Temporary matrix 1
-    matrix_type tmp1 = {
-        .p = calloc(m->r * m->r, sizeof(target_type)),
-        .r = m->r,
-        .c = m->r,
-        .Xr = m->r,
-        .Xc = 1
+    /* auxiliary matrix: column major */
+    matrix_type aux = {
+        .p = calloc(a->r * a->c, sizeof(target_type)),
+        .r = a->r,
+        .c = a->c,
+        .Xr = 1,
+        .Xc = a->r,
     };
 
-    // Temporary matrix 2
-    matrix_type tmp2 = {
-        .p = calloc(m->r * m->r, sizeof(target_type)),
-        .r = m->r,
-        .c = m->r,
-        .Xr = m->r,
-        .Xc = 1
-    };
+    /* Compute the Hermite normal form to determine the rank over rationals Q */
+    transpose(m);
+    transpose(b);
 
-    for(size_t i = 0; i < m->r; ++i) {
-        MATRIX_AT(tmp1, i, i) = 1;
-        MATRIX_AT(tmp2, i, i) = 1;
+    hermiteNF_LLL(
+        0, (matrix_type*[]){},
+        1, (matrix_type*[]){b},
+        m );
+
+    size_t rk = 0;
+    target_type * restrict aux_iter = aux.p;
+
+    /* Save the column vectors of A which are non-zero in the cokernel. */
+    for (size_t j = 0; j < m->c; ++j) {
+        // Find the first non-zero column in rk-th row.
+        if (rk < m->r && MATRIX_AT(*m, rk, j) != 0) {
+            ++rk;
+            continue;
+        }
+
+        #pragma omp parallel for
+        for(size_t i = 0; i < a->r; ++i)
+            aux_iter[i] = MATRIX_AT(*a, i, j);
+
+        aux_iter += aux.Xc;
     }
+
+    transpose(m);
+    transpose(b);
 
     /* Compute the Smith normal form of m. */
-    /* The inverse of U is stored in tmp1 */
-    smithNF(&tmp1,m,b);
+    smithNF(a, NULL, m, NULL, b);
 
-    // Compute the rank / Q.
-    size_t rk = find_first_zero_diag(m);
-
-    /* Begining of the algorithm. */
-    /* Transposition since we want to operate columns instead of rows. */
-    transpose(a);
-    transpose(&tmp1);
-
-    /* Multiply a by U from the right. */
-    /* This also makes tmp1 be the identity. */
-    hermiteNF_LLL(2, (matrix_type*[]){a,&tmp2}, &tmp1);
-
-    /* Make U cleaner */
-    /* And apply the associated modification to a. */
-    hermiteNF_LLL_partial(1, (matrix_type*[]){&tmp1}, &tmp2, rk);
-
-    for(size_t i = rk; i < a->r; ++i) {
-        if (MATRIX_AT(tmp1,i,i) < 0) // This entry is 1 or -1.
-            scalar_row(i, -1, &tmp1);
-
-        for(size_t j = 0; j < rk; ++j)
-            axpy_rows(MATRIX_AT(tmp1,j,i), i, j, a);
+    /* Overwrite column vectors of A by those saved in aux. */
+    for (size_t j = 0; j < a->c - rk; ++j) {
+        #pragma omp parallel for
+        for (size_t i = 0; i < a->r; ++i)
+            MATRIX_AT(*a, i, rk + j) = MATRIX_AT(aux, i, j);
     }
 
-    /* End of the algorithm. */
-    transpose(a);
+    free(aux.p);
 
-    free(tmp1.p);
-    free(tmp2.p);
+    /* Clean the kernel vectors */
+    if (rk < m->r) {
+        matrix_type bker = {
+            .p = b->p + rk * b->Xc,
+            .r = b->c - rk,
+            .c = b->r,
+            .Xr = b->Xc,
+            .Xc = b->Xr
+        };
+
+        hermiteNF_LLL(
+            0, (matrix_type*[]){},
+            0, (matrix_type*[]){},
+            &bker );
+    }
 }

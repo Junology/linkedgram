@@ -2,6 +2,7 @@
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE StrictData #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveAnyClass #-}
 
 ------------------------------------------------
 -- |
@@ -15,15 +16,20 @@
 
 module ArcGraph.State where
 
+import GHC.Generics (Generic)
+import Control.DeepSeq (NFData)
+
 import Control.Monad
 import Control.Applicative
 
 import Data.Foldable
+import Data.Bifunctor
 import qualified Data.List as L
 
 import ArcGraph
 
-type DiagramState = [Int]
+newtype IListState = IListState [Int]
+  deriving (Eq,Ord,Show,Generic,NFData)
 
 class Ord a => DState a where
   degree :: ArcGraph -> a -> Int
@@ -34,33 +40,33 @@ class Ord a => DState a where
   -- On determining signs, we use the ascending order on corssings.
   diffState :: Alternative t => ArcGraph -> a -> t (Int,a)
 
-instance DState [Int] where
-  degree _ = L.length
+instance DState IListState where
+  degree _ (IListState is) = L.length is
 
-  getLabel (AGraph _ cs) st
-    = map (\c -> if fst c `elem` st then '1' else '0') $ zip [0..] cs
+  getLabel (AGraph _ cs) (IListState is)
+    = map (\c -> if fst c `elem` is then '1' else '0') $ zip [0..] cs
 
-  smoothing (AGraph ps cs) st
+  smoothing (AGraph ps cs) (IListState is)
     = AGraph ps $ zipWith mkCrs [0..] cs
     where
       mkCrs i crs@(Crs sega segb crst)
-        | crst == Crossing = Crs sega segb (if i `elem` st then Smooth1 else Smooth0)
+        | crst == Crossing = Crs sega segb (if i `elem` is then Smooth1 else Smooth0)
         | otherwise = crs
 
   listStates (AGraph _ cs) deg =
     let crsIndices = L.findIndices isCross cs
-    in filter ((==deg) . length) $ L.subsequences crsIndices
+    in IListState <$> filter ((==deg) . length) (L.subsequences crsIndices)
     where
       isCross (Crs _ _ Crossing) = True
       isCross _ = False
 
-  diffState (AGraph _ cs) st
-    = snd $! foldr' bin (1,empty) [0..length cs - 1]
+  diffState (AGraph _ cs) (IListState is)
+    = second IListState <$> (snd $! foldr' bin (1,empty) [0..length cs - 1])
     where
-      bin i (sign,sts) = if i `elem` st
+      bin i (sign,sts) = if i `elem` is
                          then (negate sign, sts)
-                         else (sign, pure (sign,i:st) <|> sts)
+                         else (sign, pure (sign,L.sort (i:is)) <|> sts)
 
 listSmoothing :: [Int] -> ArcGraph -> [ArcGraph]
 listSmoothing degrees ag
-  = smoothing ag <$!> ((listStates ag :: Int -> [DiagramState]) =<< degrees)
+  = smoothing ag <$!> ((listStates ag :: Int -> [IListState]) =<< degrees)

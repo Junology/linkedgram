@@ -23,6 +23,7 @@ module Numeric.Algebra.IntMatrix.NormalForms (
   smithRep
   ) where
 
+import Control.Monad
 import Control.Monad.ST
 import Control.Monad.ST.Unsafe
 
@@ -43,34 +44,32 @@ type Ok = IO CInt
 --------------------------------------------------------------
 
 -- | Hermite normal form
-foreign import ccall unsafe "c_hermiteNF_LLL_partial" cHermiteNFP :: CInt -> Z ::> Z ::> Ok
-foreign import ccall unsafe "c_hermiteNF_LLL" cHermiteNF :: Z ::> Z ::> Ok
+foreign import ccall unsafe "c_hermiteNF_LLL" cHermiteNF :: Z ::> Z ::> Z ::> Ok
 
-hermiteNFPST :: Int -> STMatrix s Z -> STMatrix s Z -> ST s ()
-hermiteNFPST k stU stH = do
+hermiteNFST :: STMatrix s Z -> STMatrix s Z -> STMatrix s Z -> ST s ()
+hermiteNFST stU stUi stH = do
   u <- unsafeFreezeMatrix stU
+  ui <- unsafeFreezeMatrix stUi
   h <- unsafeFreezeMatrix stH
-  unsafeIOToST (apply u (apply h id) (cHermiteNFP (fromIntegral k)) #| "cHermiteNFP")
+  unsafeIOToST (apply u (apply ui (apply h id)) cHermiteNF #| "cHermiteNF")
 
-hermiteNFP :: Int -> Matrix Z -> (Matrix Z, Matrix Z)
-hermiteNFP k mat = runST $ do
+hermiteNFDecomp :: Matrix Z -> (Matrix Z, Matrix Z, Matrix Z)
+hermiteNFDecomp mat = runST $ do
   stMat <- thawMatrix mat
   stU <- thawMatrix $ ident (rows mat)
-  hermiteNFPST k stU stMat
-  (,) <$> unsafeFreezeMatrix stU <*> unsafeFreezeMatrix stMat
-
-hermiteNFST :: STMatrix s Z -> STMatrix s Z -> ST s ()
-hermiteNFST stU stH = do
-  u <- unsafeFreezeMatrix stU
-  h <- unsafeFreezeMatrix stH
-  unsafeIOToST (apply u (apply h id) cHermiteNF #| "cHermiteNF")
+  stUi <- thawMatrix $ ident (rows mat)
+  hermiteNFST stU stUi stMat
+  (\x y z -> (x,y,z)) <$!> unsafeFreezeMatrix stU <*> unsafeFreezeMatrix stUi <*> unsafeFreezeMatrix stMat
 
 hermiteNF :: Matrix Z -> (Matrix Z, Matrix Z)
-hermiteNF mat = runST $ do
-  stMat <- thawMatrix mat
-  stU <- thawMatrix $ ident (rows mat)
-  hermiteNFST stU stMat
-  (,) <$> unsafeFreezeMatrix stU <*> unsafeFreezeMatrix stMat
+hermiteNF = p . hermiteNFDecomp
+  where
+    p (x,y,z) = (y,z)
+
+hermiteDecomp :: Matrix Z -> (Matrix Z, Matrix Z)
+hermiteDecomp = p . hermiteNFDecomp
+  where
+    p (x,y,z) = (x,z)
 
 -- | Smith normal form
 foreign import ccall unsafe "c_smithNF" cSmithNF :: Z ::> Z ::> Z ::> Ok

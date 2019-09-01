@@ -56,7 +56,7 @@ localCross (Crs sega segb Crossing) = (sega,segb)
 localCross (Crs (Sgmt v0 v1) (Sgmt w0 w1) Smooth0) = (Sgmt v0 w1, Sgmt v1 w0)
 localCross (Crs (Sgmt v0 v1) (Sgmt w0 w1) Smooth1) = (Sgmt v0 w0, Sgmt v1 w1)
 
--- Attach a label on elements.
+-- | Attach a label on elements.
 mkConnection :: (a -> Bool) -> MV.STVector s (Maybe Int,a) -> STRef s Int -> ST s ()
 mkConnection p edgeMV cntRef = do
   edgeV <- V.freeze edgeMV

@@ -118,7 +118,7 @@ showKhovanovDialog ag mayparent = do
   hboxSm <- hBoxNew True 0
   listMVec <- MV.unsafeNew (countCross slimAG+1)
   forM_ [0..countCross slimAG] $ \i -> do
-    (smthList,arcGraphView) <- createArcGraphView slimAG i :: IO (ListStore DiagramState, IconView)
+    (smthList,arcGraphView) <- createArcGraphView slimAG i :: IO (ListStore IListState, IconView)
     set arcGraphView [
       iconViewSelectionMode := SelectionMultiple,
       iconViewColumns := 1 ]
@@ -163,7 +163,7 @@ showKhovanovDialog ag mayparent = do
       -- Execute computation on all quantum-degrees
       hasBndry <- toggleButtonGetActive checkBndry
       let maxQDeg = let (AGraph ps _) = slimAG in L.length ps
-      let khMap :: Map.Map (Int,Int) (KHData DiagramState (MapEState ArcList))
+      let khMap :: Map.Map (Int,Int) (KHData IListState (MapEState ArcList))
           !khMap = V.foldl' Map.union Map.empty $! withStrategy (parTraversable  rdeepseq) $! V.fromList [-maxQDeg..maxQDeg] <&> \j -> computeKhovanov slimAG 0 (MV.length listMVec) j states hasBndry
       -- modofying the degrees
       nPCrs <- spinButtonGetValueAsInt spinPCrs
@@ -171,7 +171,7 @@ showKhovanovDialog ag mayparent = do
       let modif (i,j) = if slimized
                         then (i-(nCrs-nPCrs), j-2*i+nPCrs)
                         else (i-(nCrs-nPCrs), j-2*(nCrs-nPCrs)+nPCrs)
-      let khMap' :: Map.Map (Int,Int) (KHData DiagramState (MapEState ArcList))
+      let khMap' :: Map.Map (Int,Int) (KHData IListState (MapEState ArcList))
           khMap' = Map.mapKeys modif khMap
       writeFile (fromJust mayfname) (docKhovanovTikz ag "pdftex,a4paper" "scrartcl" khMap')
 
