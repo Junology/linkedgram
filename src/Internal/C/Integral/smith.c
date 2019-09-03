@@ -82,9 +82,10 @@ size_t find_first_zero_diag(const matrix_type *mat)
 
 /*!
  * Eliminate all the off-diagonal entries by applying LLL-based algorithm recursively.
+ * \return the number of non-zero diagonals in the resulting matrix.
  */
 static
-void elim_offdiag(matrix_type * restrict u, matrix_type * restrict uinv, matrix_type * restrict m, matrix_type * restrict v, matrix_type * restrict vinv)
+size_t elim_offdiag(matrix_type * restrict u, matrix_type * restrict uinv, matrix_type * restrict m, matrix_type * restrict v, matrix_type * restrict vinv)
 {
     matrix_type u_iter = *u, uinv_iter = *uinv;
     matrix_type m_iter = *m;
@@ -105,6 +106,9 @@ void elim_offdiag(matrix_type * restrict u, matrix_type * restrict uinv, matrix_
         .Xr = vinv->Xc,
         .Xc = vinv->Xr
     };
+
+    /* Counter for non-zero diagonals. */
+    size_t ndiag = 0;
 
     while(m_iter.r > 0 && m_iter.c > 0) {
         hermiteNF_LLL(
@@ -132,13 +136,19 @@ void elim_offdiag(matrix_type * restrict u, matrix_type * restrict uinv, matrix_
         vt_iter.p += k * vt_iter.Xc;
         vinvt_iter.r -= k;
         vinvt_iter.p += k * vinvt_iter.Xr;
+
+        /* update the counter of non-zero diagonals. */
+        ndiag += k;
     }
+
+    return ndiag;
 }
 
 /*!
  * Compute the Smith normal form of a given matrix.
+ * \return the number of non-zero diagonals in the resulting matrix.
  */
-void smithNF(matrix_type * restrict u, matrix_type * restrict uinv, matrix_type * restrict m, matrix_type * restrict v, matrix_type * restrict vinv)
+size_t smithNF(matrix_type * restrict u, matrix_type * restrict uinv, matrix_type * restrict m, matrix_type * restrict v, matrix_type * restrict vinv)
 {
     matrix_type u_iter = u ? *u : MATRIX_ZEROROW(m->r);
     matrix_type uinv_iter = uinv ? *uinv : MATRIX_ZEROCOL(m->r);
@@ -146,7 +156,8 @@ void smithNF(matrix_type * restrict u, matrix_type * restrict uinv, matrix_type 
     matrix_type v_iter = v ? *v : MATRIX_ZEROCOL(m->c);
     matrix_type vinv_iter = vinv ? *vinv : MATRIX_ZEROROW(m->c);
 
-    elim_offdiag(&u_iter, &uinv_iter, &m_iter, &v_iter, &vinv_iter);
+    size_t ndiag
+        = elim_offdiag(&u_iter, &uinv_iter, &m_iter, &v_iter, &vinv_iter);
 
     // Trim the matrix into square
     if (m_iter.r > m_iter.c) {
@@ -217,6 +228,8 @@ void smithNF(matrix_type * restrict u, matrix_type * restrict uinv, matrix_type 
         --vinv_iter.c;
         vinv_iter.p += vinv_iter.Xc;
     }
+
+    return ndiag;
 }
 
 /*!
@@ -230,69 +243,41 @@ void smithNF(matrix_type * restrict u, matrix_type * restrict uinv, matrix_type 
  * where 
  * - U and V are unimodular;
  * - S is in a Smith normal form.
- * \param a transformed into a.U.
+ * \param a transformed into the matrix product a <> U.
  * \param m A representation matrix for f; transformed into S.
- * \param b transformed into b.V.
- * \pre Be sure that both a.U and b.V make sense.
+ * \param b transformed into the matrix product b <> V.
+ * \pre Be sure that both a <> U and b <> V make sense.
  */
-void smithRep(matrix_type * restrict a, matrix_type * restrict m, matrix_type * restrict b)
+size_t smithRep(matrix_type * restrict a, matrix_type * restrict m, matrix_type * restrict b)
 {
     /* auxiliary matrix: column major */
     matrix_type aux = {
-        .p = calloc(a->r * a->c, sizeof(target_type)),
+        .p = calloc(a->r * a->r, sizeof(target_type)),
         .r = a->r,
-        .c = a->c,
+        .c = a->r,
         .Xr = 1,
         .Xc = a->r,
     };
 
-    /* Compute the Hermite normal form to determine the rank over rationals Q */
-    transpose(m);
-    transpose(b);
+    /* Initialize aux into the identity matrix. */
+    for(size_t i = 0; i < a->r; ++i)
+        MATRIX_AT(aux,i,i) = 1;
 
-    hermiteNF_LLL(
-        0, (matrix_type*[]){},
-        1, (matrix_type*[]){b},
-        m );
+    /* Compute the Smith normal form of m and save the number of non-zero diagonals. */
+    size_t ndiag = smithNF(&aux, NULL, m, NULL, b);
 
-    size_t rk = 0;
-    target_type * restrict aux_iter = aux.p;
+    /* Multiply A by U which is as simple as possible. */
+    aux.c = ndiag;
+    hermiteNF_LLL(1, (matrix_type*[]){a}, 0, (matrix_type*[]){}, &aux);
 
-    /* Save the column vectors of A which are non-zero in the cokernel. */
-    for (size_t j = 0; j < m->c; ++j) {
-        // Find the first non-zero column in rk-th row.
-        if (rk < m->r && MATRIX_AT(*m, rk, j) != 0) {
-            ++rk;
-            continue;
-        }
-
-        #pragma omp parallel for
-        for(size_t i = 0; i < a->r; ++i)
-            aux_iter[i] = MATRIX_AT(*a, i, j);
-
-        aux_iter += aux.Xc;
-    }
-
-    transpose(m);
-    transpose(b);
-
-    /* Compute the Smith normal form of m. */
-    smithNF(a, NULL, m, NULL, b);
-
-    /* Overwrite column vectors of A by those saved in aux. */
-    for (size_t j = 0; j < a->c - rk; ++j) {
-        #pragma omp parallel for
-        for (size_t i = 0; i < a->r; ++i)
-            MATRIX_AT(*a, i, rk + j) = MATRIX_AT(aux, i, j);
-    }
-
+    /* We will not use aux any more. */
     free(aux.p);
 
-    /* Clean the kernel vectors */
-    if (rk < m->r) {
+    /* Make the kernel vectors cleaner. */
+    if (ndiag < m->r) {
         matrix_type bker = {
-            .p = b->p + rk * b->Xc,
-            .r = b->c - rk,
+            .p = b->p + ndiag * b->Xc,
+            .r = b->c - ndiag,
             .c = b->r,
             .Xr = b->Xc,
             .Xc = b->Xr
@@ -303,4 +288,6 @@ void smithRep(matrix_type * restrict a, matrix_type * restrict m, matrix_type * 
             0, (matrix_type*[]){},
             &bker );
     }
+
+    return ndiag;
 }

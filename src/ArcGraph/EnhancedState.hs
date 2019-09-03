@@ -50,22 +50,32 @@ import Numeric.Algebra.IntChain
 
 {-- for debug
 import Debug.Trace
+
+traceCond :: Bool -> String -> a -> a
+traceCond False _  = id
+traceCond True msg = trace msg
 --}
 
----------------------
--- Enhanced states --
----------------------
+-----------------------
+-- * Enhanced states --
+-----------------------
 class (DState ds, Ord e) => Enhancement ds e where
   listEnh :: (Alternative f) => Int -> ArcGraph -> ds -> f e
   diffEnh :: ArcGraph -> ds -> e -> FreeMod Int (ds,e)
 
+listEStates :: (Enhancement ds e) => ArcGraph -> Int -> Int -> [(ds,e)]
+listEStates ag i j = concatMap (\s -> (,) s <$> listEnh j ag s) $ listStates ag i
+
+-----------------
+-- * Instances --
+-----------------
 newtype MapEState pc = MEState (Map.Map pc SL2B)
   deriving (Eq, Ord, Show, Generic, NFData)
 
 instance (DState ds, PComponent pc) => Enhancement ds (MapEState pc) where
-  listEnh i ag st = 
+  listEnh j ag st = 
     let comps = getComponents (smoothing ag st)
-        deg' = i + L.length comps
+        deg' = j - degree ag st + L.length comps
         subs = filter (\sub -> 2*L.length sub == deg') $ L.subsequences comps
         mapS sub = Map.fromList $! map (\c -> (c, if elem c sub then SLI else SLX)) comps
     in MEState <$> foldr' (\x xs -> pure (mapS x) <|> xs) empty subs
@@ -130,26 +140,22 @@ cohomologyToKH ag basis hasBndry hdata =
              else Nothing }
 
 -- | Compute Khovanov homology for given range of cohomological degrees and a given quantum-degree
-computeKhovanov :: (DState ds, Enhancement ds e) => ArcGraph -> Int -> Int -> Int -> [ds] -> Bool -> Map.Map (Int,Int) (KHData ds e)
-computeKhovanov ag minhdeg maxhdeg qdeg states hasBndry =
+computeKhovanov :: (NFData ds, NFData e, Show ds, Show e, Eq ds, Eq e, Enhancement ds e) => ArcGraph -> Int -> [ds] -> Bool -> Map.Map (Int,Int) (KHData ds e)
+computeKhovanov ag qdeg states hasBndry =
   let numCrs = countCross ag
-      minhdeg' = max 0 (minhdeg-1)
-      maxhdeg' = min numCrs (maxhdeg+1)
-      hdegsNHD = [minhdeg' .. maxhdeg']
+      hdegs = [0..numCrs]
       slimAG = slimCross ag
-      basis i = L.concatMap (\st -> (,) st <$> listEnh (qdeg-i) slimAG st) (filter ((==i). degree slimAG) states)
-      basisMap = Map.fromSet basis (Set.fromList hdegsNHD)
-      diffs = flip (parMap rdeepseq) [minhdeg'..maxhdeg'-1] $ \i ->
+      basis i = L.concatMap (\st -> (,) st <$> listEnh qdeg slimAG st) (filter ((==i). degree slimAG) states)
+      basisMap = Map.fromSet basis (Set.fromAscList hdegs)
+      !diffs = flip (parMap rdeepseq) [0..numCrs-1] $ \i ->
         let sbasis = basisMap Map.! i
             tbasis = basisMap Map.! (i+1)
-        in force $! if null sbasis || null tbasis
-                    then (length tbasis LA.>< length sbasis) []
-                    else matiDataToLA $ genMatrix (uncurry (diffEnh ag)) sbasis tbasis
-  in if maxhdeg' <= minhdeg'
+        in force $! genMatrixILA (uncurry (diffEnh ag)) sbasis tbasis
+  in if numCrs == 0
      then -- The case where there is no crossing point;
        Map.mapKeysMonotonic (\i -> (i,qdeg)) $ Map.map (\v -> KHData slimAG (L.length v) [] (fmap (1@*@%) v) Nothing) basisMap
      else -- The case where there is at least one crossing point;
-       let !hdata = force $ intHomology (L.head diffs) (L.tail diffs)
-           hdataMap = Map.fromList $ filter (\hdti -> fst hdti >= minhdeg && fst hdti <= maxhdeg && not (null (freeCycs (snd hdti)) && null (torCycs (snd hdti))) ) $ zip [minhdeg..maxhdeg] hdata
-           khMap = flip Map.mapWithKey hdataMap $ \i hdt -> cohomologyToKH slimAG (basisMap Map.! i) hasBndry hdt
-       in Map.mapKeysMonotonic (\i -> (i,qdeg {- -2*i -})) khMap
+       let !hdata = force $ intHomology (L.head diffs) (L.drop 1 diffs)
+           !hdataMap = Map.fromList $ filter (\hdti -> not (null (freeCycs (snd hdti)) && null (torCycs (snd hdti))) ) $ zip hdegs hdata
+           !khMap = flip Map.mapWithKey hdataMap $ \i hdt -> cohomologyToKH slimAG (basisMap Map.! i) hasBndry hdt
+       in Map.mapKeysMonotonic (\i -> (i,qdeg)) khMap

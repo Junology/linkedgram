@@ -12,6 +12,7 @@
 
 module ArcGraph.TikZ (
   showArcGraphTikz,
+  showArcGraphEnhTikz,
   showStateSumTikz,
   docKhovanovTikz,
   typesetArcGraphTikz,
@@ -53,11 +54,11 @@ texEnd :: String
 texEnd = "\\end{document}\n"
 
 texParagraph :: String -> String
-texParagraph str = "\\paragraph{" ++ str ++ "}\n\\mbox\\\\\\leavevmode\n"
+texParagraph str = "\\paragraph{" ++ str ++ "}\n\\mbox{}\\\\\\leavevmode\n"
 
 texHorizontalLine :: String
 texHorizontalLine
-  = "\\leavevmode\n\\\\\n\\noindent\\makebox[\\linewidth]{\\rule{\\paperwidth}{0.4pt}}\n"
+  = "\\leavevmode\n\\\n\\noindent\\makebox[\\linewidth]{\\rule{\\paperwidth}{0.4pt}}\n"
 
 tikzFloat :: Double -> String
 tikzFloat x = showFFloat (Just 4) x ""
@@ -165,17 +166,20 @@ showArcGraphEnhTikz bd ag st (MEState coeffMap) = flip execState "" $ do
     modify' (++ (nodeCommand x y $ case coeff of {SLI -> "$1$"; SLX -> "$X$";}))
 
 showStateSumTikz :: (DState ds, PComponent pc) => Double -> ArcGraph -> FreeMod Int (ds, MapEState pc) -> String
-showStateSumTikz bd ag vect = flip execState "" $ do
-  modify' (++"\\begin{dmath*}\n")
-  forEachWithInterM drawAG (modify' (++"+")) vect
-  modify' (++"\\end{dmath*}\n")
-  where
-    drawAG :: (DState ds, PComponent pc) => Int -> (ds, MapEState pc) -> State String ()
-    drawAG coeff (st,enh) = do
-      modify' (++ show coeff)
-      modify' (++"\\tikz{%\n")
-      modify' (++ showArcGraphEnhTikz bd ag st enh)
-      modify' (++"}\n")
+showStateSumTikz bd ag vect = flip execState "" $
+  if vect == zeroVec
+  then modify' (++ "\\[0\\]\n")
+  else do
+    modify' (++"\\begin{dmath*}\n")
+    forEachWithInterM drawAG (modify' (++"+")) vect
+    modify' (++"\\end{dmath*}\n")
+      where
+        drawAG :: (DState ds, PComponent pc) => Int -> (ds, MapEState pc) -> State String ()
+        drawAG coeff (st,enh) = do
+          modify' (++ show coeff)
+          modify' (++"\\tikz{%\n")
+          modify' (++ showArcGraphEnhTikz bd ag st enh)
+          modify' (++"}\n")
 
 flatZip :: Eq a => [a] -> [(Int,a)]
 flatZip [] = []

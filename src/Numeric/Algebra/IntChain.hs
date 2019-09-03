@@ -13,8 +13,8 @@
 --
 ------------------------------------------------
 
-module Numeric.Algebra.IntChain
-  (IntHomology(..), intHomology) where
+module Numeric.Algebra.IntChain  where
+--  (IntHomology(..), intHomology) where
 
 import GHC.Generics (Generic, Generic1)
 import Control.DeepSeq (NFData, NFData1, force)
@@ -44,6 +44,10 @@ import Numeric.Algebra.IntMatrix.NormalForms
 
 {-- for Debug
 import Debug.Trace
+
+traceCond :: Bool -> String -> a -> a
+traceCond False _  = id
+traceCond True msg = trace msg
 --}
 
 -- | Matrix representation in a Smith normal form.
@@ -83,10 +87,10 @@ squeezeMat basis matA matB = runST $ do
             then LA.extractMatrix stU LA.AllRows (LA.FromCol rkQ)
             else return $ (LA.rows matA LA.>< 0) []
   {-- Debug
-  when (not (null invFs)) $ do
-    trace (show matA) $ return ()
-    trace (show invFs) $ return ()
-    trace (show fimage ++ show fcoker) $ return ()
+  when (any (>1) invFs) $ do
+    matA' <- LA.unsafeFreezeMatrix stMatA
+    traceShowM matA
+    traceShowM matA'
   --}
   return (RepSmith invFs resBasis fimage, fcoker, matB LA.<> fcoker)
 

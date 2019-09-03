@@ -1,7 +1,7 @@
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE StrictData #-}
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveAnyClass #-}
 
 ------------------------------------------------
 -- |
@@ -19,17 +19,17 @@ import GHC.Generics
 
 import Control.Applicative
 
+import Control.DeepSeq (deepseq)
 import Control.Parallel
 import Control.Parallel.Strategies
 
+import Data.Functor
 import Data.List as L (transpose, foldl', splitAt, replicate)
 
 import Numeric.Algebra.FreeModule
 
 data SL2B = SLI | SLX
-  deriving (Show, Eq, Ord, Generic)
-
-instance NFData SL2B
+  deriving (Show, Eq, Ord, Generic, NFData)
 
 -- | Frobenius algebra structure over integers
 class Ord b => BFrobeniusI b where
@@ -41,7 +41,7 @@ class Ord b => BFrobeniusI b where
   unit :: FreeMod Int b
   -- ^ unit
 
-  foldMult :: [b] -> FreeMod Int b
+  foldMult :: (Foldable t) => t b -> FreeMod Int b
   -- ^ fold multiplication
 
   -- Coalgebra structure --
@@ -76,7 +76,7 @@ instance BFrobeniusI SL2B where
   mult SLX SLI = 1@*@SLX
   mult SLX SLX = zeroVec
 
-  foldMult = maybe zeroVec (1@*@) . L.foldl' mult' (Just SLI)
+  foldMult = maybe zeroVec (1@*@) . foldl mult' (Just SLI)
     where
       mult' mel SLI = mel
       mult' Nothing _ = Nothing
@@ -86,9 +86,9 @@ instance BFrobeniusI SL2B where
   diag SLI = 1@*@(SLI,SLX) @+ 1@*@(SLX,SLI)
   diag SLX = 1@*@(SLX,SLX)
 
-  foldDiag n SLI = sumFM' $ flip map [0..(n-1)] $ \i ->
-    let (xs,ys) = L.splitAt i (replicate (n-1) SLX)
-    in 1@*@% (xs ++ (SLI:ys))
+  foldDiag n SLI = sumFM' $ parMap (rparWith rdeepseq) f [0..(n-1)]
+    where
+      f i = 1@*@% (replicate i SLX ++ (SLI:replicate (n-i-1) SLX))
   foldDiag n SLX = 1@*@% L.replicate n SLX
 
   unit = 1@*@SLI
@@ -109,17 +109,17 @@ tqftZ' p doms cods =
 --}
 
 -- | TQFT operation of genus Zero represented by coincidence
-tqftZ :: (Ord a2, Ord b, BFrobeniusI b)
+tqftZ :: (Ord a2, Ord b, BFrobeniusI b, NFData b)
   => (a1 -> a2 -> Bool) -> [(a1,b)] -> [a2] -> FreeMod Int [(a2,b)]
 tqftZ p doms cods
   = let mkU cs i = if i < length cs
                    then if cs!!i
-                     then Right (1@*@)
+                     then Right (1@*@%)
                      else Left unit
                    else
-                     Right (1@*@)
+                     Right (1@*@%)
         bin (v,x)
           = let cs = map (p v) cods
-            in insertMapFM (mkU cs) $ foldDiag (sum $ map fromEnum cs) x
-        med = L.transpose @$> tensorFM (parMap rpar bin doms)
-    in zip cods @$> mapFM foldMult med
+            in insertMapFM (mkU cs) $ foldDiag (sum (map fromEnum cs)) x
+        !med = L.transpose @$>% tensorFM (parMap (rparWith rdeepseq) bin doms)
+    in med `deepseq` zip cods @$> mapFM foldMult med

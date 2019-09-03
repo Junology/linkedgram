@@ -61,7 +61,7 @@ genPixbufArcGraph :: DState ds => ArcGraph -> Int -> IO ([ds], Map.Map ds Pixbuf
 genPixbufArcGraph ag deg = do
   let states = listStates ag deg
       normAg = normalize (pictSize / 2.0) ag
-  pixMapRef <- newIORef Map.empty
+  pixMapRef <- newIORef (Map.empty :: Map.Map ds Pixbuf)
   surface <- Cairo.createImageSurface Cairo.FormatRGB24 pictSize pictSize
   forM_ states $ \cs -> do
     Cairo.renderWith surface $ do
@@ -164,7 +164,7 @@ showKhovanovDialog ag mayparent = do
       hasBndry <- toggleButtonGetActive checkBndry
       let maxQDeg = let (AGraph ps _) = slimAG in L.length ps
       let khMap :: Map.Map (Int,Int) (KHData IListState (MapEState ArcList))
-          !khMap = V.foldl' Map.union Map.empty $! withStrategy (parTraversable  rdeepseq) $! V.fromList [-maxQDeg..maxQDeg] <&> \j -> computeKhovanov slimAG 0 (MV.length listMVec) j states hasBndry
+          !khMap = V.foldl' Map.union Map.empty $! V.fromList [-maxQDeg..maxQDeg] <&> \j -> computeKhovanov slimAG j states hasBndry
       -- modofying the degrees
       nPCrs <- spinButtonGetValueAsInt spinPCrs
       slimized <- toggleButtonGetActive checkSlim
