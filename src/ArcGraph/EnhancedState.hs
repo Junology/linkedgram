@@ -33,7 +33,10 @@ import Data.Foldable
 import qualified Data.List as L
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as MV
+import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.IntMap.Strict (IntMap)
+import qualified Data.IntMap.Strict as IMap
 import qualified Data.Set as Set
 import qualified Data.BitArray as BA
 
@@ -140,22 +143,21 @@ cohomologyToKH ag basis hasBndry hdata =
              else Nothing }
 
 -- | Compute Khovanov homology for given range of cohomological degrees and a given quantum-degree
-computeKhovanov :: (NFData ds, NFData e, Show ds, Show e, Eq ds, Eq e, Enhancement ds e) => ArcGraph -> Int -> [ds] -> Bool -> Map.Map (Int,Int) (KHData ds e)
+computeKhovanov :: (NFData ds, NFData e, Show ds, Show e, Eq ds, Eq e, Enhancement ds e) => ArcGraph -> Int -> [ds] -> Bool -> IntMap (KHData ds e)
 computeKhovanov ag qdeg states hasBndry =
   let numCrs = countCross ag
       hdegs = [0..numCrs]
       slimAG = slimCross ag
       basis i = L.concatMap (\st -> (,) st <$> listEnh qdeg slimAG st) (filter ((==i). degree slimAG) states)
-      basisMap = Map.fromSet basis (Set.fromAscList hdegs)
+      basisMap = IMap.fromAscList (map (\i -> (i,basis i)) hdegs)
       !diffs = flip (parMap rdeepseq) [0..numCrs-1] $ \i ->
-        let sbasis = basisMap Map.! i
-            tbasis = basisMap Map.! (i+1)
-        in force $! genMatrixILA (uncurry (diffEnh ag)) sbasis tbasis
+        let sbasis = basisMap IMap.! i
+            tbasis = basisMap IMap.! (i+1)
+        in force $! genMatrixILA (uncurry (diffEnh slimAG)) sbasis tbasis
   in if numCrs == 0
      then -- The case where there is no crossing point;
-       Map.mapKeysMonotonic (\i -> (i,qdeg)) $ Map.map (\v -> KHData slimAG (L.length v) [] (fmap (1@*@%) v) Nothing) basisMap
+       IMap.map (\v -> KHData slimAG (L.length v) [] (fmap (1@*@%) v) Nothing) basisMap
      else -- The case where there is at least one crossing point;
        let !hdata = force $ intHomology (L.head diffs) (L.drop 1 diffs)
-           !hdataMap = Map.fromList $ filter (\hdti -> not (null (freeCycs (snd hdti)) && null (torCycs (snd hdti))) ) $ zip hdegs hdata
-           !khMap = flip Map.mapWithKey hdataMap $ \i hdt -> cohomologyToKH slimAG (basisMap Map.! i) hasBndry hdt
-       in Map.mapKeysMonotonic (\i -> (i,qdeg)) khMap
+           !hdataMap = IMap.fromAscList $ filter (\hdti -> not (null (freeCycs (snd hdti)) && null (torCycs (snd hdti))) ) $ zip hdegs hdata
+       in flip IMap.mapWithKey hdataMap $ \i hdt -> cohomologyToKH slimAG (basisMap IMap.! i) hasBndry hdt

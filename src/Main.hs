@@ -25,20 +25,6 @@ import Dialog.Export
 import Dialog.Khovanov
 import Config
 
-
---{---------------
--- For Debug --
----------------
-import ArcGraph.EnhancedState hiding (arcGraph)
-import Numeric.Algebra.FreeModule
-import Debug.Trace
-
-trefoil :: ArcGraph
-trefoil = slimCross $ AGraph [APath OpenPath [(-60.0,-52.0),(-124.0,-53.0),(-171.0,67.0),(-135.0,187.0),(-63.0,191.0)],APath OpenPath [(65.0,-56.0),(132.0,-56.0),(180.0,68.0),(128.0,182.0),(62.0,187.0)]] [Crs (Sgmt (-63.0,191.0) (63.0,140.0)) (Sgmt (-67.0,141.0) (62.0,187.0)) Crossing,Crs (Sgmt (63.0,94.0) (-67.0,141.0)) (Sgmt (63.0,140.0) (-67.0,93.0)) Crossing,Crs (Sgmt (63.0,94.0) (-67.0,48.0)) (Sgmt (-67.0,93.0) (66.0,44.0)) Crossing,Crs (Sgmt (64.0,-4.0) (-67.0,48.0)) (Sgmt (66.0,44.0) (-66.0,-4.0)) Crossing,Crs (Sgmt (-66.0,-4.0) (65.0,-56.0)) (Sgmt (-60.0,-52.0) (64.0,-4.0)) Crossing]
-
------------------
------------------}
-
 makeTitle :: AppData -> String
 makeTitle appData =
   let fname = fileName appData
@@ -243,17 +229,8 @@ main = do
         readIORef appRef >>= updateTitle window
       Nothing -> return ()
   onToolButtonClicked tliExport $ do
-    graph <- fmap arcGraph $ readIORef appRef
-    mayconf <- showExportDialog (Just window)
-    case mayconf of
-      Just (ExportConfig fmt sort path)
-        -> case (fmt,sort) of
-             (TikzOut, OutLink)
-               -> writeFile path (typesetArcGraphTikz "" "standalone" [graph])
-             (TikzOut, OutSmooth)
-               -> writeFile path (docArcGraphTikz "" "scrartcl" [graph])
-      Nothing
-        -> return ()
+    ag <- fmap arcGraph $ readIORef appRef
+    showExportDialog ag (Just window)
   onToolButtonToggled tliDraw $ do
     isAct <- toggleToolButtonGetActive tliDraw
     case isAct of

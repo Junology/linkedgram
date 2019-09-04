@@ -13,25 +13,32 @@ module Dialog.Khovanov where
 import Control.Monad
 import Control.Monad.ST
 
+import Control.DeepSeq (force)
 import Control.Parallel
 import Control.Parallel.Strategies
 
 import Data.Functor ((<&>))
 import Data.Maybe
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import Data.List as L
+import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.IntMap.Strict (IntMap)
+import qualified Data.IntMap.Strict as IMap
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as MV
 import Data.IORef
 import Data.STRef
 
 import System.Directory
+import System.IO
 
 import Graphics.UI.Gtk
 import qualified Graphics.Rendering.Cairo as Cairo
 
 import Config
+import Text.TeXout
 import ArcGraph
 import ArcGraph.Common
 import ArcGraph.Component
@@ -53,6 +60,16 @@ import System.IO
 import Debug.Trace
 --}
 
+-----------------------
+-- * Orphan instances
+-----------------------
+instance TeXMathShow (KHData ds e) where
+  texMathShow kh = finAbGroup (rank kh) (tors kh)
+
+--------------------------
+-- * The view for states
+--------------------------
+-- | Size of Pixbuf in the icon view.
 pictSize :: Num a => a
 pictSize = 80
 
@@ -136,10 +153,13 @@ showKhovanovDialog ag mayparent = do
   boxPackStart vbox scroll PackGrow 0
   containerAdd scroll hboxSm
   -- Spin button to input the number of positive crossings
+  hlabelCrs <- labelNew (Just "Number of positive crossings")
+  miscSetAlignment hlabelCrs 1.0 0.5
   let nCrs = countCross slimAG
   spinPCrs <-spinButtonNewWithRange 0 (fromIntegral nCrs) 1
-  hlabelCrs <- labelNew (Just "Number of positive crossings")
+  -- CheckButton to detemine wheter boundaries are exported or not.
   checkBndry <- checkButtonNewWithLabel "Export boundaries"
+  -- CheckButton to determine degree convention for quantum-degree.
   checkSlim <- checkButtonNewWithLabel "Slim Table of Cohomology"
   hboxConf <- hBoxNew False 3
   boxPackStart hboxConf hlabelCrs PackNatural 0
@@ -147,7 +167,6 @@ showKhovanovDialog ag mayparent = do
   boxPackStart hboxConf checkBndry PackNatural 0
   boxPackStart hboxConf checkSlim PackNatural 0
   boxPackStart vbox hboxConf PackNatural 0
-  -- CheckButton to determine degree convention for quantum-degree.
   widgetShowAll khovanovDlg
 
   btnExport `on` buttonActivated $ do
@@ -160,20 +179,67 @@ showKhovanovDialog ag mayparent = do
         let (smthList,agView) = agvlv
         mapM (listStoreGetValue smthList)
           =<< (map head <$> iconViewGetSelectedItems agView :: IO [Int])
-      -- Execute computation on all quantum-degrees
-      hasBndry <- toggleButtonGetActive checkBndry
+      -- The bound for quantum degrees
       let maxQDeg = let (AGraph ps _) = slimAG in L.length ps
-      let khMap :: Map.Map (Int,Int) (KHData IListState (MapEState ArcList))
-          !khMap = V.foldl' Map.union Map.empty $! V.fromList [-maxQDeg..maxQDeg] <&> \j -> computeKhovanov slimAG j states hasBndry
-      -- modofying the degrees
+      -- Read options
+      hasBndry <- toggleButtonGetActive checkBndry
       nPCrs <- spinButtonGetValueAsInt spinPCrs
-      slimized <- toggleButtonGetActive checkSlim
-      let modif (i,j) = if slimized
-                        then (i-(nCrs-nPCrs), j-2*i+nPCrs)
-                        else (i-(nCrs-nPCrs), j-2*(nCrs-nPCrs)+nPCrs)
-      let khMap' :: Map.Map (Int,Int) (KHData IListState (MapEState ArcList))
-          khMap' = Map.mapKeys modif khMap
-      writeFile (fromJust mayfname) (docKhovanovTikz ag "pdftex,a4paper" "scrartcl" khMap')
+      modif <- toggleButtonGetActive checkSlim <&> \ifslim -> \i j ->
+        if ifslim
+        then (i-(nCrs-nPCrs), j-2*i+nPCrs)
+        else (i-(nCrs-nPCrs), j-2*(nCrs-nPCrs)+nPCrs)
+      let khMap :: Map (Int,Int) (KHData IListState (MapEState ArcList))
+          khMap = runST $ do
+            stMap <- newSTRef Map.empty
+            forM_ [-maxQDeg..maxQDeg] $ \j -> do
+              -- Compute Khovanov homology.
+              -- Pass ag instead of slimAG.
+              let !jkhMap = force $ computeKhovanov ag j states hasBndry
+              forM_ (IMap.toList jkhMap) $ \ikh -> do
+                let (i,kh) = ikh
+                modifySTRef' stMap (Map.insert (modif i j) kh)
+            readSTRef stMap
+      -- Export the TeX source
+      handle <- openFile (fromJust mayfname) WriteMode
+      T.hPutStrLn handle $ documentClass "pdftex,a4paper" "scrartcl"
+      T.hPutStrLn handle $ T.empty
+      T.hPutStrLn handle $ usePackage "" "amsmath,amssymb"
+      T.hPutStrLn handle $ usePackage "" "tikz"
+      T.hPutStrLn handle $ macro "allowdisplaybreaks" [OptArg "2"]
+      T.hPutStrLn handle $ T.empty
+      T.hPutStrLn handle $ beginEnv "document" []
+      T.hPutStrLn handle $ beginEnv "center" []
+      T.hPutStrLn handle $ beginEnv "tikzpicture" []
+      T.hPutStrLn handle $ T.pack $ showArcGraphTikzWithComp 0.15 (normalize 2.0 slimAG)
+      T.hPutStrLn handle $ endEnv "tikzpicture"
+      T.hPutStrLn handle $ endEnv "center"
+      T.hPutStrLn handle $ T.empty
+      T.hPutStrLn handle $ macro "section*" [FixArg "Table of Homology Groups"]
+      T.hPutStrLn handle $ beginEnv "equation*" []
+      T.hPutStrLn handle $ texMathShow khMap
+      T.hPutStrLn handle $ endEnv "equation*"
+      T.hPutStrLn handle $ T.empty
+      T.hPutStrLn handle $ macro "tableofcontents" []
+      T.hPutStrLn handle $ T.empty
+      forM_ (Map.toList khMap) $ \ijkh -> do
+        let ((i,j),kh) = ijkh
+        T.hPutStrLn handle $ macro "section*" [FixArg $ "The group $Kh^{" ++ show (i,j) ++ "}$"]
+        T.hPutStrLn handle $ macro "subsection*" [FixArg "Generating Cycle"]
+        forM_ (cycleV kh) $ \cyc -> do
+          T.hPutStrLn handle $ beginEnv "dmath*" []
+          T.hPutStrLn handle $ showStateSumTikzText slimAG cyc
+          T.hPutStrLn handle $ endEnv "dmath*"
+        T.hPutStrLn handle $ T.empty
+        when (isJust (bndryV kh)) $ do
+          T.hPutStrLn handle $ macro "subsection*" [FixArg "Boundaries"]
+          forM_ (fromMaybe [] (bndryV kh)) $ \bnd -> do
+            T.hPutStrLn handle $ beginEnv "dmath*" []
+            T.hPutStrLn handle $ showStateSumTikzText slimAG bnd
+            T.hPutStrLn handle $ endEnv "dmath*"
+          T.hPutStrLn handle $ T.empty
+      T.hPutStrLn handle $ endEnv "document"
+      hClose handle
+      -- writeFile (fromJust mayfname) (docKhovanovTikz ag "pdftex,a4paper" "scrartcl" khMap)
 
   -- Close the dialog when "Close" is pressed
   btnClose `on` buttonActivated $ do

@@ -10,20 +10,18 @@
 --
 ------------------------------------------------
 
-module ArcGraph.TikZ (
-  showArcGraphTikz,
-  showArcGraphEnhTikz,
-  showStateSumTikz,
-  docKhovanovTikz,
-  typesetArcGraphTikz,
-  docArcGraphTikz
-  ) where
+module ArcGraph.TikZ where
 
 import Control.Monad
 import Control.Monad.State.Strict
+import Control.Monad.ST
+
+import Data.STRef
 
 import Data.Maybe
 import Data.List
+import Data.Text (Text)
+import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
 import Data.Foldable
 
@@ -32,6 +30,7 @@ import Numeric
 import Numeric.Algebra.FreeModule
 import Numeric.Algebra.Frobenius
 
+import Text.TeXout
 import ArcGraph
 import ArcGraph.Component
 import ArcGraph.State
@@ -45,7 +44,7 @@ texHeader option cls
   ++ option ++ "]{" ++ cls ++ "}\n"
 
 texPreamble :: String
-texPreamble = "\\usepackage{amsmath,amssymb}\n\\usepackage{tikz}\n\\usepackage{breqn}\n"
+texPreamble = "\\usepackage{amsmath,amssymb}\n\\usepackage{tikz}\n\n\\allowdisplaybreaks[2]\n\n"
 
 texBegin :: String
 texBegin = "\\begin{document}\n"
@@ -140,39 +139,53 @@ showCrossTikz bd (Crs sega segb crst)
            showCrossTikz bd (Crs (tposeSegment sega) segb Smooth0)
 
 showArcGraphTikz :: Double -> ArcGraph -> String
-showArcGraphTikz bd ag = flip execState "" $ do
-  let (AGraph ps cs) = slimCross $ normalize 1.0 ag
+showArcGraphTikz bd (AGraph ps cs) = flip execState "" $ do
   for_ ps $ \path ->
     modify' (++ showArcPathTikz Nothing path)
   modify' (++ concatMap (showCrossTikz bd) cs)
 
-showArcGraphTikzWithComp :: DState s => Double -> ArcGraph -> s -> String
-showArcGraphTikzWithComp bd ag st = flip execState "" $ do
-  let ag'@(AGraph ps cs) = smoothing (normalize 1.0 ag) st
-  for_ (zip (getComponents ag' :: [ArcList]) (cycle $ map Just tikzColors)) $ \ipsc -> do
+showArcGraphTikzWithComp :: Double -> ArcGraph -> String
+showArcGraphTikzWithComp bd ag@(AGraph _ cs) = flip execState "" $ do
+  for_ (zip (getComponents ag :: [ArcList]) (cycle $ map Just tikzColors)) $ \ipsc -> do
     let (ips,c) = ipsc
-    for_ (componentAt ag' ips) $ \x ->
+    for_ (componentAt ag ips) $ \x ->
       modify' (++ showArcPathTikz c x)
   modify' (++ concatMap (showCrossTikz bd) cs)
 
 showArcGraphEnhTikz :: (DState ds, PComponent pc) => Double -> ArcGraph -> ds -> MapEState pc -> String
 showArcGraphEnhTikz bd ag st (MEState coeffMap) = flip execState "" $ do
   let normAG = normalize 1.0 ag
-  modify' (++ showArcGraphTikzWithComp bd normAG st)
+  modify' (++ showArcGraphTikzWithComp bd (smoothing normAG st))
   forM_ (Map.toList coeffMap) $ \kv -> do
     let (comp,coeff) = kv
         (x,y) = fromMaybe (0,0) $ findMostVrtx (\v w -> fst v < fst w) $ componentAt normAG comp
     -- Draw label
     modify' (++ (nodeCommand x y $ case coeff of {SLI -> "$1$"; SLX -> "$X$";}))
 
+showStateSumTikzText :: (DState ds, PComponent pc) => ArcGraph -> FreeMod Int (ds, MapEState pc) -> Text
+showStateSumTikzText ag vect =
+  if vect == zeroVec
+  then T.singleton '0'
+  else runST $ do
+    let normAG = normalize 1.0 ag
+    stTeX <- newSTRef T.empty
+    let drawAG coeff (st,enh) = do
+          modifySTRef' stTeX (<> texMathShow coeff)
+          modifySTRef' stTeX (<> macro "tikz" [OptArg "baseline=-.5ex"])
+          modifySTRef' stTeX (<> T.pack "{%\n")
+          modifySTRef' stTeX (<> T.pack (showArcGraphEnhTikz 0.15 normAG st enh))
+          modifySTRef' stTeX (<> T.pack "}")
+    forEachWithInterM drawAG (modifySTRef' stTeX (<> T.singleton '+')) vect
+    readSTRef stTeX
+
 showStateSumTikz :: (DState ds, PComponent pc) => Double -> ArcGraph -> FreeMod Int (ds, MapEState pc) -> String
 showStateSumTikz bd ag vect = flip execState "" $
   if vect == zeroVec
   then modify' (++ "\\[0\\]\n")
   else do
-    modify' (++"\\begin{dmath*}\n")
+    modify' (++"\\begin{multline*}\n")
     forEachWithInterM drawAG (modify' (++"+")) vect
-    modify' (++"\\end{dmath*}\n")
+    modify' (++"\\end{multline*}\n")
       where
         drawAG :: (DState ds, PComponent pc) => Int -> (ds, MapEState pc) -> State String ()
         drawAG coeff (st,enh) = do
@@ -180,132 +193,3 @@ showStateSumTikz bd ag vect = flip execState "" $
           modify' (++"\\tikz{%\n")
           modify' (++ showArcGraphEnhTikz bd ag st enh)
           modify' (++"}\n")
-
-flatZip :: Eq a => [a] -> [(Int,a)]
-flatZip [] = []
-flatZip xs@(_:_) = uncurry (:) $ foldr bin ((1,last xs),[]) (init xs)
-  where
-    bin y ((n,z),zs)
-      | y==z      = ((n+1,z),zs)
-      | otherwise = ((1,y),(n,z):zs)
-
-showAbGroupTeX :: Int -> [Int] -> String
-showAbGroupTeX freeRk torsions =
-  case torsions of
-    []{- no torsion -}
-      | freeRk > 0 -> freepart freeRk
-      | otherwise  -> "0"
-    _ {- has torsions -}
-      | freeRk > 0 -> freepart freeRk ++ "\\oplus " ++ torpart torsions
-      | otherwise  -> torpart torsions
-  where
-    freepart rk
-      | rk == 1   = "\\mathbb Z"
-      | otherwise = "\\mathbb Z^{\\oplus " ++ show rk ++ "}"
-    markupTor (r,t)
-      | r <= 0 = "0"
-      | r == 1 = "\\mathbb Z/" ++ show t
-      | r >= 2 = "\\left(\\mathbb Z/" ++ show t ++ "\\right)^{" ++ show r ++ "}"
-    torpart trs = intercalate "\\oplus " $ map markupTor (flatZip trs)
-
-showHomologyTableTeX :: (PComponent pc) => Map.Map (Int,Int) (KHData ds (MapEState pc)) -> String
-showHomologyTableTeX khMap =
-  let mayRange = foldl' rangeFinder Nothing (Map.keys khMap)
-  in case mayRange of
-       Nothing -> ""
-       (Just (imin,imax,jmin,jmax)) -> flip execState "" $ do
-         modify' (++("\\begin{array}{r|" ++ replicate (jmax-jmin+1) 'c' ++ "}\n"))
-         modify' (++"i\\backslash j & ")
-         forM_ [jmin..jmax] $ \j ->
-           modify'(++(show j ++ if j<jmax then "&" else "\\\\\\hline\n"))
-         forM_ [imin..imax] $ \i -> do
-           modify' (++(show i ++ "&"))
-           forM_ [jmin..jmax] $ \j -> do
-             case khMap Map.!? (i,j) of
-               Just khdata ->
-                 modify' (++ showAbGroupTeX (rank khdata) (tors khdata))
-               Nothing ->
-                 return ()
-             when (j < jmax) $ modify' (++"&")
-           when (i < imax) $ modify' (++"\\\\\n")
-         modify' (++ "\\end{array}")
-  where
-    rangeFinder Nothing (i,j) = Just (i,i,j,j)
-    rangeFinder (Just (imin,imax,jmin,jmax)) (i,j) =
-      let imin' = if i < imin then i else imin
-          imax' = if i > imax then i else imax
-          jmin' = if j < jmin then j else jmin
-          jmax' = if j > jmax then j else jmax
-      in Just (imin',imax',jmin',jmax')
-
-showKHDataTikz :: (DState ds, PComponent pc) => Int -> Int -> KHData ds (MapEState pc) -> String
-showKHDataTikz i j khData = flip execState "" $ do
-  modify' (++ texParagraph "Homology group")
-  modify' (++ "\\[\n")
-  modify' (++("\\overline{\\mathit{Kh}}^{" ++ show i ++ "," ++ show j ++ "}\n"))
-  modify' (++("\\cong" ++ showAbGroupTeX (rank khData) (tors khData)))
-  modify' (++ "\\]\n")
-  modify' (++ texParagraph "Generating cycles")
-  forM_ (cycleV khData) $ \cyc -> modify' (++ showStateSumTikz 0.15 (subject khData) cyc)
-  case bndryV khData of
-    Just bnds -> do
-      modify' (++ texParagraph "Killing boundaries")
-      forM_ bnds (\bnd -> modify' (++ showStateSumTikz 0.15 (subject khData) bnd))
-    Nothing -> return ()
-
-docKhovanovTikz :: (DState ds, PComponent pc) => ArcGraph -> String -> String -> Map.Map (Int,Int) (KHData ds (MapEState pc)) -> String
-docKhovanovTikz ag opts cls khMap = flip execState "" $ do
-  modify' (++ texHeader opts cls)
-  modify' (++ texPreamble)
-  modify' (++ texBegin)
-  modify' (++"\n\\section{}\n")
-  modify' (++"\\begin{center}\n")
-  modify' (++tikzBegin 2.0)
-  modify' (++showArcGraphTikz 0.15 ag)
-  modify' (++tikzEnd)
-  modify' (++"\\end{center}\n")
-  modify' (++"\\section*{Table of homology groups}\n")
-  modify' (++"\\[")
-  modify' (++showHomologyTableTeX khMap)
-  modify' (++"\\]")
-  forM_ (Map.keys khMap) $ \ind -> do
-    let (i,j) = ind
-    modify' (++texHorizontalLine)
-    modify' (++ showKHDataTikz i j (khMap Map.! (i,j)))
-  modify' (++ texEnd)
-
-typesetArcGraphTikz :: String -> String -> [ArcGraph] -> String
-typesetArcGraphTikz option cls ags = flip execState "" $ do
-  modify' (++texHeader option cls)
-  modify' (++texPreamble)
-  modify' (++texBegin)
-  forM_ ags $ \ag -> do
-    modify' (++tikzBegin 1.0)
-    modify' (++showArcGraphTikz 0.15 ag)
-    modify' (++tikzEnd)
-  modify' (++texEnd)
-
-docArcGraphTikz :: String -> String -> [ArcGraph] -> String
-docArcGraphTikz option cls ags = flip execState "" $ do
-  modify' (++texHeader option cls)
-  modify' (++texPreamble)
-  modify' (++texBegin)
-  forM_ ags $ \ag -> do
-    modify' (++"\n\\section{}\n")
-    modify' (++"\\begin{center}\n")
-    modify' (++tikzBegin 1.0)
-    modify' (++showArcGraphTikz 0.15 ag)
-    modify' (++tikzEnd)
-    modify' (++"\\end{center}\n")
-    forM_ [0..countCross ag] $ \i -> do
-      modify' (++texHorizontalLine)
-      modify' (++"\\subsection*{$H^{" ++ show i ++ ",\\star}$}\n")
-      -- modify' (++texHorizontalLine)
-      modify' (++"\\begin{center}\n")
-      forM_ (listSmoothing [i] ag) $ \agsm -> do
-        modify' (++tikzBegin 1.0)
-        modify' (++showArcGraphTikz 0.15 agsm)
-        modify' (++tikzEnd)
-        modify' (++"\\hfill\n")
-      modify' (++"\\end{center}\n")
-  modify' (++texEnd)

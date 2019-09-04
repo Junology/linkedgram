@@ -263,8 +263,18 @@ size_t smithRep(matrix_type * restrict a, matrix_type * restrict m, matrix_type 
     for(size_t i = 0; i < a->r; ++i)
         MATRIX_AT(aux,i,i) = 1;
 
-    /* Compute the Smith normal form of m and save the number of non-zero diagonals. */
-    size_t ndiag = smithNF(&aux, NULL, m, NULL, b);
+    /* 
+     * Compute the Smith normal form of m and save the number of non-zero diagonals.
+     * For cleaner image vectors, it is good to compute the Smith normal form of the transpose of m intead of m itself.
+     */
+    transpose(m);
+    transpose(b);
+
+    size_t ndiag = smithNF(NULL, b, m, &aux, NULL);
+
+    transpose(m);
+    transpose(b);
+    transpose(&aux);
 
     /* Multiply A by U which is as simple as possible. */
     aux.c = ndiag;

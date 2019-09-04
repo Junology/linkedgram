@@ -1,6 +1,6 @@
 {-# LANGUAGE Strict #-}
 {-# LANGUAGE StrictData #-}
-{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveGeneric, DeriveAnyClass #-}
 
 ------------------------------------------------
 -- |
@@ -38,8 +38,8 @@ import Data.Foldable
 ------------------
 -- * Data types --
 ------------------
-newtype FreeMod a b = FMod (Map b a)
-  deriving (Eq, Generic)
+newtype FreeMod a b = FMod { termMap :: Map b a }
+  deriving (Eq, Ord, Generic, NFData)
 
 instance (Show a, Show b) => Show (FreeMod a b) where
   show (FMod mp)
@@ -50,19 +50,17 @@ instance (Show a, Show b) => Show (FreeMod a b) where
     where
       show' (x,r) = show r ++ "@*@" ++ show x
 
-instance (NFData a, NFData b) => NFData (FreeMod a b)
-
 --------------------------------
 -- * Miscellaneous operations --
 --------------------------------
 getCoeff :: (Num a, Ord b) => b -> FreeMod a b -> a
-getCoeff x (FMod mp) = M.fromMaybe 0 (Map.lookup x mp)
+getCoeff x = M.fromMaybe 0 . Map.lookup x . termMap
 
 spanning :: FreeMod a b -> [b]
-spanning (FMod mp) = Map.keys mp
+spanning = Map.keys . termMap
 
 removeZero :: (Num a, Eq a) => FreeMod a b -> FreeMod a b
-removeZero (FMod x) = FMod $ Map.filter (/=0) x
+removeZero = FMod . Map.filter (/=0) . termMap
 
 forEachWithInterM :: Monad m => (a -> b -> m ()) -> m () -> FreeMod a b -> m ()
 forEachWithInterM f g (FMod mp) =
