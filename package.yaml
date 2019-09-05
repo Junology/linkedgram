@@ -51,6 +51,33 @@ executables:
     extra-libraries:
     - omp
 
+tests:
+  linkedgram-test:
+    main:        TestMain.hs
+    source-dirs:
+    - test
+    - src
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    c-sources:
+    - src/Internal/C/**/*.c
+    cc-options: -O3 -march=native
+    cpp-options:
+    - -DPROJECT_NAME="linkedgram"
+    - -DPROJECT_VERSION="0.1.0.0"
+    - -DPROJECT_AUTHOR_GIVEN="Jun"
+    - -DPROJECT_AUTHOR_FAMILY="Yoshida"
+    - -DPROJECT_COPYRIGHT_YEAR="2019"
+    - -DPROJECT_LICENSE="BSD3"
+    - -DPROJECT_HOMEPAGE="https://github.com/Junology/linkedgram#readme"
+    ld-options: -O3 -march=native
+    extra-libraries:
+    - omp
+#    dependencies:
+#    - linkedgram
+
 benchmarks:
   linkedgram-bench:
     source-dirs:

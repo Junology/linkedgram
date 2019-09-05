@@ -186,6 +186,10 @@ mapSgmtM f (Sgmt v w) = do {v' <- f v; w' <- f w; return (Sgmt v' w')}
 mapSgmt :: (Vertex -> Vertex) -> Segment -> Segment
 mapSgmt = mapRemoveM mapSgmtM
 
+connectable :: Segment -> Segment -> Bool
+connectable (Sgmt v0 w0) (Sgmt v1 w1)
+  = v0 == v1 || v0 == w1 || w0 == v1 || w0 == w1
+
 --------------
 -- Crossing --
 --------------
@@ -297,11 +301,11 @@ mapArcPathM f (APath ty vs)
 mapArcPath :: (Vertex -> Vertex) -> ArcPath -> ArcPath
 mapArcPath = mapRemoveM mapArcPathM
 
-getEndVrtx :: ArcPath -> [Vertex]
-getEndVrtx (APath _ []) = []
-getEndVrtx (APath ClosedPath (x:_)) = [x]
-getEndVrtx (APath OpenPath [x]) = [x]
-getEndVrtx (APath OpenPath (x:xs@(_:_))) = [x,last xs]
+getEndSgmt :: ArcPath -> Segment
+getEndSgmt (APath _ []) = undefined
+-- ^ Undefined for empty paths
+getEndSgmt (APath ClosedPath (x:_)) = Sgmt x x
+getEndSgmt (APath OpenPath xs) = Sgmt (head xs) (last xs)
 
 --------------
 -- ArcGraph --

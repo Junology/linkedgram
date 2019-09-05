@@ -11,7 +11,6 @@
 module Dialog.Khovanov where
 
 import Control.Monad
-import Control.Monad.ST
 
 import Control.DeepSeq (force)
 import Control.Parallel
@@ -29,7 +28,6 @@ import qualified Data.IntMap.Strict as IMap
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as MV
 import Data.IORef
-import Data.STRef
 
 import System.Directory
 import System.IO
@@ -37,6 +35,7 @@ import System.IO
 import Graphics.UI.Gtk
 import qualified Graphics.Rendering.Cairo as Cairo
 
+import Data.ChunkedBits
 import Config
 import Text.TeXout
 import ArcGraph
@@ -188,29 +187,30 @@ showKhovanovDialog ag mayparent = do
         if ifslim
         then (i-(nCrs-nPCrs), j-2*i+nPCrs)
         else (i-(nCrs-nPCrs), j-2*(nCrs-nPCrs)+nPCrs)
-      let khMap :: Map (Int,Int) (KHData IListState (MapEState ArcList))
-          khMap = runST $ do
-            stMap <- newSTRef Map.empty
-            forM_ [-maxQDeg..maxQDeg] $ \j -> do
-              -- Compute Khovanov homology.
-              -- Pass ag instead of slimAG.
-              let !jkhMap = force $ computeKhovanov ag j states hasBndry
-              forM_ (IMap.toList jkhMap) $ \ikh -> do
-                let (i,kh) = ikh
-                modifySTRef' stMap (Map.insert (modif i j) kh)
-            readSTRef stMap
+
+      -- Compute Khovanov homology
+      khMapRef <- newIORef (Map.empty :: Map (Int,Int) (KHData IListState (MapEState (ArcBits ChunkedBits))))
+      forM_ [-maxQDeg..maxQDeg] $ \j -> do
+        -- Pass ag instead of slimAG.
+        let !jkhMap = force $ computeKhovanov ag j states hasBndry
+        forM_ (IMap.toList jkhMap) $ \ikh -> do
+          let (i,kh) = ikh
+          modifyIORef' khMapRef (Map.insert (modif i j) kh)
+      khMap <- readIORef khMapRef
+
       -- Export the TeX source
       handle <- openFile (fromJust mayfname) WriteMode
       T.hPutStrLn handle $ documentClass "pdftex,a4paper" "scrartcl"
       T.hPutStrLn handle $ T.empty
       T.hPutStrLn handle $ usePackage "" "amsmath,amssymb"
       T.hPutStrLn handle $ usePackage "" "tikz"
+      T.hPutStrLn handle $ usePackage "" "breqn"
       T.hPutStrLn handle $ macro "allowdisplaybreaks" [OptArg "2"]
       T.hPutStrLn handle $ T.empty
       T.hPutStrLn handle $ beginEnv "document" []
       T.hPutStrLn handle $ beginEnv "center" []
       T.hPutStrLn handle $ beginEnv "tikzpicture" []
-      T.hPutStrLn handle $ T.pack $ showArcGraphTikzWithComp 0.15 (normalize 2.0 slimAG)
+      T.hPutStrLn handle $ showArcGraphTikzWithComp 0.15 (normalize 2.0 slimAG)
       T.hPutStrLn handle $ endEnv "tikzpicture"
       T.hPutStrLn handle $ endEnv "center"
       T.hPutStrLn handle $ T.empty
@@ -223,7 +223,11 @@ showKhovanovDialog ag mayparent = do
       T.hPutStrLn handle $ T.empty
       forM_ (Map.toList khMap) $ \ijkh -> do
         let ((i,j),kh) = ijkh
-        T.hPutStrLn handle $ macro "section*" [FixArg $ "The group $Kh^{" ++ show (i,j) ++ "}$"]
+        T.hPutStrLn handle $ macro "section*" [FixArg $ "The group $Kh^{" ++ show i ++ "," ++ show j ++ "}$"]
+        T.hPutStrLn handle $ beginEnv "equation*" []
+        T.hPutStrLn handle $ texMathShow kh
+        T.hPutStrLn handle $ endEnv "equation*"
+        T.hPutStrLn handle $ T.empty
         T.hPutStrLn handle $ macro "subsection*" [FixArg "Generating Cycle"]
         forM_ (cycleV kh) $ \cyc -> do
           T.hPutStrLn handle $ beginEnv "dmath*" []

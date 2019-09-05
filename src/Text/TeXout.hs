@@ -30,6 +30,7 @@ import qualified Data.Map.Strict as Map
 import Numeric (showFFloat)
 
 import Numeric.Algebra.FreeModule
+import Numeric.Algebra.Frobenius
 
 -- | Class of types which are exhibited in LaTeX display maths.
 class TeXMathShow a where
@@ -47,6 +48,10 @@ instance TeXMathShow Int where
 
 instance TeXMathShow Double where
   texMathShow x = T.pack $ showFFloat (Just 4) x ""
+
+instance TeXMathShow SL2B where
+  texMathShow SLI = T.singleton '1'
+  texMathShow SLX = T.singleton 'X'
 
 instance (TeXMathShow a, TeXMathShow b) => TeXMathShow (a,b) where
   texMathShow (x,y)
@@ -92,6 +97,9 @@ instance (TeXMathShow a) => TeXMathShow (Map (Int,Int) a) where
 ------------------------------
 -- * Macros argment control
 ------------------------------
+embrace :: String -> Text
+embrace str = '{' `T.cons` T.pack str `T.snoc` '}'
+
 data TeXArg = OptArg String | FixArg String
   deriving (Eq, Ord, Generic, NFData)
 
@@ -100,8 +108,7 @@ encloseArg (OptArg arg)
   = case arg of
       []        -> T.empty
       otherwise -> '[' `T.cons` T.pack arg `T.snoc` ']'
-encloseArg (FixArg arg)
-  = '{' `T.cons` T.pack arg `T.snoc` '}'
+encloseArg (FixArg arg) = embrace arg
 
 encloseArgs :: (Foldable t) => t TeXArg -> Text
 encloseArgs = foldl (\enc arg -> enc <> encloseArg arg) T.empty

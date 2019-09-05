@@ -86,7 +86,7 @@ instance (DState ds, PComponent pc) => Enhancement ds (MapEState pc) where
   diffEnh ag st (MEState mp) =
     FM.sumFM $ (diffState ag st :: V.Vector (Int,ds)) >>= \dstp -> do
       let (sign,dst) = dstp
-      return $! ((,) dst . MEState . Map.fromList) FM.@$>% sign FM.@*% Frob.tqftZ (hasIntersection ag) (Map.toList mp) (getComponents (smoothing ag dst))
+      return $! ((,) dst . MEState . Map.fromList) FM.@$>% sign FM.@*% Frob.tqftZ (doIntersect ag) (Map.toList mp) (getComponents (smoothing ag dst))
 
 ----------------------
 -- WORK IN PROGRESS --

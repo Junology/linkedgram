@@ -102,8 +102,8 @@ showExportDialog ag mayparent = do
           T.hPutStrLn handle $ beginEnv "document" []
           T.hPutStrLn handle $ beginEnv "tikzpicture" []
           if colored
-            then T.hPutStrLn handle $ T.pack (showArcGraphTikzWithComp 0.15 normAG)
-            else T.hPutStrLn handle $ T.pack (showArcGraphTikz 0.15 normAG)
+            then T.hPutStrLn handle $ showArcGraphTikzWithComp 0.15 normAG
+            else T.hPutStrLn handle $ showArcGraphTikz 0.15 normAG
           T.hPutStrLn handle $ endEnv "tikzpicture"
         otherwise -> return ()
       T.hPutStrLn handle $ endEnv "document"
