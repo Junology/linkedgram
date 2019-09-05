@@ -21,6 +21,7 @@ import Data.Maybe
 import Data.List
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Map (Map)
 import qualified Data.Map.Strict as Map
 import Data.Foldable
 
@@ -144,8 +145,8 @@ showArcGraphEnhTikz bd ag st (MEState coeffMap) = runST $ do
       showSL2B SLI = "$1$"
       showSL2B SLX = "$X$"
 
-showStateSumTikzText :: (DState ds, PComponent pc) => ArcGraph -> FreeMod Int (ds, MapEState pc) -> Text
-showStateSumTikzText ag vect =
+showStateSumTikz :: (DState ds, PComponent pc) => ArcGraph -> FreeMod Int (ds, MapEState pc) -> Text
+showStateSumTikz ag vect =
   if vect == zeroVec
   then T.singleton '0'
   else runST $ do
@@ -159,3 +160,18 @@ showStateSumTikzText ag vect =
           modifySTRef' stTeX (<> T.pack "}")
     forEachWithInterM drawAG (modifySTRef' stTeX (<> T.singleton '+')) vect
     readSTRef stTeX
+
+chunksOfMap :: (Ord k) => Int -> Map k a -> [Map k a]
+chunksOfMap n = unfoldr $ \mp ->
+  if Map.null mp
+  then Nothing
+  else Just (Map.splitAt n mp)
+
+showStateSumTikzMultlined :: (DState ds, PComponent pc) => ArcGraph -> FreeMod Int (ds, MapEState pc) -> Int -> (Bool,Text)
+showStateSumTikzMultlined ag vect n =
+  if vect == zeroVec
+  then (False,T.singleton '0')
+  else 
+    let termLines = chunksOfMap n (termMap vect)
+        textLines = fmap (showStateSumTikz ag . FMod) termLines
+    in (length textLines > 1, T.intercalate (T.pack "\\\\\n+") textLines)

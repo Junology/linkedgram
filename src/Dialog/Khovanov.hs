@@ -198,13 +198,12 @@ showKhovanovDialog ag mayparent = do
           modifyIORef' khMapRef (Map.insert (modif i j) kh)
       khMap <- readIORef khMapRef
 
-      -- Export the TeX source
+      -- Export TeX source
       handle <- openFile (fromJust mayfname) WriteMode
       T.hPutStrLn handle $ documentClass "pdftex,a4paper" "scrartcl"
       T.hPutStrLn handle $ T.empty
       T.hPutStrLn handle $ usePackage "" "amsmath,amssymb"
       T.hPutStrLn handle $ usePackage "" "tikz"
-      T.hPutStrLn handle $ usePackage "" "breqn"
       T.hPutStrLn handle $ macro "allowdisplaybreaks" [OptArg "2"]
       T.hPutStrLn handle $ T.empty
       T.hPutStrLn handle $ beginEnv "document" []
@@ -223,23 +222,34 @@ showKhovanovDialog ag mayparent = do
       T.hPutStrLn handle $ T.empty
       forM_ (Map.toList khMap) $ \ijkh -> do
         let ((i,j),kh) = ijkh
-        T.hPutStrLn handle $ macro "section*" [FixArg $ "The group $Kh^{" ++ show i ++ "," ++ show j ++ "}$"]
+            sectionName = "The group $Kh^{" ++ show i ++ "," ++ show j ++ "}$"
+        T.hPutStrLn handle $ macro "section*" [FixArg sectionName ]
+        T.hPutStrLn handle $ macro "addcontentsline" [
+          FixArg "toc", FixArg "section", FixArg sectionName ]
         T.hPutStrLn handle $ beginEnv "equation*" []
         T.hPutStrLn handle $ texMathShow kh
         T.hPutStrLn handle $ endEnv "equation*"
         T.hPutStrLn handle $ T.empty
         T.hPutStrLn handle $ macro "subsection*" [FixArg "Generating Cycle"]
         forM_ (cycleV kh) $ \cyc -> do
-          T.hPutStrLn handle $ beginEnv "dmath*" []
-          T.hPutStrLn handle $ showStateSumTikzText slimAG cyc
-          T.hPutStrLn handle $ endEnv "dmath*"
+          let (isMult,tex) = showStateSumTikzMultlined slimAG cyc 5
+              envName = if isMult
+                        then "multline*"
+                        else "equation*"
+          T.hPutStrLn handle $ beginEnv envName []
+          T.hPutStrLn handle $ tex
+          T.hPutStrLn handle $ endEnv envName
         T.hPutStrLn handle $ T.empty
         when (isJust (bndryV kh)) $ do
           T.hPutStrLn handle $ macro "subsection*" [FixArg "Boundaries"]
           forM_ (fromMaybe [] (bndryV kh)) $ \bnd -> do
-            T.hPutStrLn handle $ beginEnv "dmath*" []
-            T.hPutStrLn handle $ showStateSumTikzText slimAG bnd
-            T.hPutStrLn handle $ endEnv "dmath*"
+            let (isMult,tex) = showStateSumTikzMultlined slimAG bnd 5
+                envName = if isMult
+                          then "multline*"
+                          else "equation*"
+            T.hPutStrLn handle $ beginEnv envName []
+            T.hPutStrLn handle $ tex
+            T.hPutStrLn handle $ endEnv envName
           T.hPutStrLn handle $ T.empty
       T.hPutStrLn handle $ endEnv "document"
       hClose handle
