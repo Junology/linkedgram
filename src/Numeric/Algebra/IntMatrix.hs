@@ -13,6 +13,7 @@ module Numeric.Algebra.IntMatrix (
   hermiteNF,
   -- Smith normal form
   smithNF,
+  smithRep,
   -- Compute Image and Kernel
   kerImOf,
   -- Translation

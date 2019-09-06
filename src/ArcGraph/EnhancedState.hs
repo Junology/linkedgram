@@ -49,7 +49,7 @@ import ArcGraph.State
 import Numeric.Algebra.FreeModule as FM
 import Numeric.Algebra.Frobenius as Frob
 import Numeric.Algebra.IntMatrix
-import Numeric.Algebra.IntChain
+import Numeric.Algebra.Homology
 
 {-- for debug
 import Debug.Trace
@@ -130,14 +130,14 @@ data KHData ds e = KHData {
 vecToSum :: (Integral a, Num a, LA.Element a, Ord b) => [b] -> LA.Vector a -> FreeMod Int b
 vecToSum bs v = sumFM $! zipWith (@*@%) (fromIntegral <$!> LA.toList v) bs
 
-cohomologyToKH :: (DState ds, Enhancement ds e) => ArcGraph -> [(ds, e)] -> Bool -> IntHomology -> KHData ds e
+cohomologyToKH :: (DState ds, Enhancement ds e) => ArcGraph -> [(ds, e)] -> Bool -> Homology LA.Z -> KHData ds e
 cohomologyToKH ag basis hasBndry hdata =
   let basisAGE = uncurry (AGraphE ag) <$> basis
   in KHData {
     subject = ag,
     rank = L.length (freeCycs hdata),
-    tors = fmap (fromIntegral . snd) (torCycs hdata),
-    cycleV = fmap (vecToSum basis) (freeCycs hdata ++ fmap fst (torCycs hdata)),
+    tors = fmap (fromIntegral . fst) (torsions hdata),
+    cycleV = fmap (vecToSum basis) (freeCycs hdata ++ fmap snd (torsions hdata)),
     bndryV = if hasBndry
              then Just (fmap (vecToSum basis) (bndries hdata))
              else Nothing }
@@ -158,6 +158,6 @@ computeKhovanov ag qdeg states hasBndry =
      then -- The case where there is no crossing point;
        IMap.map (\v -> KHData slimAG (L.length v) [] (fmap (1@*@%) v) Nothing) basisMap
      else -- The case where there is at least one crossing point;
-       let !hdata = force $ intHomology (L.head diffs) (L.drop 1 diffs)
-           !hdataMap = IMap.fromAscList $ filter (\hdti -> not (null (freeCycs (snd hdti)) && null (torCycs (snd hdti))) ) $ zip hdegs hdata
+       let !hdata = force $ homology diffs
+           !hdataMap = IMap.fromAscList $ filter (\hdti -> not (null (freeCycs (snd hdti)) && null (torsions (snd hdti))) ) $ zip hdegs hdata
        in flip IMap.mapWithKey hdataMap $ \i hdt -> cohomologyToKH slimAG (basisMap IMap.! i) hasBndry hdt
