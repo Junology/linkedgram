@@ -17,6 +17,7 @@ import Control.Monad.ST
 
 import Data.STRef
 
+import Numeric.Natural (Natural)
 import Data.Maybe
 import Data.List
 import Data.Text (Text)
@@ -30,7 +31,6 @@ import Numeric (showFFloat)
 import Numeric.Algebra.FreeModule
 import Numeric.Algebra.Frobenius
 
-import Data.ChunkedBits
 import Text.TeXout
 import ArcGraph
 import ArcGraph.Component
@@ -122,7 +122,7 @@ showArcGraphTikz bd (AGraph ps cs)
 showArcGraphTikzWithComp :: Double -> ArcGraph -> Text
 showArcGraphTikzWithComp bd ag@(AGraph _ cs) = runST $ do
   stTeX <- newSTRef T.empty
-  forM_ (zip (getComponents ag :: [ArcBits ChunkedBits]) (cycle $ map Just tikzColors)) $ \ipsc -> do
+  forM_ (zip (getComponents ag :: [ArcBits Natural]) (cycle $ map Just tikzColors)) $ \ipsc -> do
     let (ips,c) = ipsc
     for_ (componentAt ag ips) $ \x ->
       modifySTRef' stTeX (<> showArcPathTikz c x)
@@ -145,7 +145,7 @@ showArcGraphEnhTikz bd ag st (MEState coeffMap) = runST $ do
       showSL2B SLI = "$1$"
       showSL2B SLX = "$X$"
 
-showStateSumTikz :: (DState ds, PComponent pc) => ArcGraph -> FreeMod Int (ds, MapEState pc) -> Text
+showStateSumTikz :: (TeXMathShow a, Num a, Eq a, DState ds, PComponent pc) => ArcGraph -> FreeMod a (ds, MapEState pc) -> Text
 showStateSumTikz ag vect =
   if vect == zeroVec
   then T.singleton '0'
@@ -167,7 +167,7 @@ chunksOfMap n = unfoldr $ \mp ->
   then Nothing
   else Just (Map.splitAt n mp)
 
-showStateSumTikzMultlined :: (DState ds, PComponent pc) => ArcGraph -> FreeMod Int (ds, MapEState pc) -> Int -> (Bool,Text)
+showStateSumTikzMultlined :: (TeXMathShow a, Num a, Eq a, DState ds, PComponent pc) => ArcGraph -> FreeMod a (ds, MapEState pc) -> Int -> (Bool,Text)
 showStateSumTikzMultlined ag vect n =
   if vect == zeroVec
   then (False,T.singleton '0')

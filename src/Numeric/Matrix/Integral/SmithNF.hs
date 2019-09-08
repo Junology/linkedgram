@@ -1,6 +1,6 @@
 ------------------------------------------------
 -- |
--- Module    :  Numeric.Algebra.IntMatrix.SmithNF
+-- Module    :  Numeric.Matrix.Integral.SmithNF
 -- Copyright :  (c) Jun Yoshida 2019
 -- License   :  BSD3
 --
@@ -8,7 +8,7 @@
 --
 ------------------------------------------------
 
-module Numeric.Algebra.IntMatrix.SmithNF where
+module Numeric.Matrix.Integral.SmithNF where
 
 import Control.Monad (when, unless, forM_, guard, join)
 import Control.Monad.ST
@@ -20,8 +20,8 @@ import Data.STRef
 import Numeric.LinearAlgebra as LA
 import Numeric.LinearAlgebra.Devel
 
---import Numeric.Algebra.IntMatrix.HNFLLL (hnfLLLST)
-import Numeric.Algebra.IntMatrix.NormalForms (hermiteNFST)
+--import Numeric.Matrix.Integral.HNFLLL (hnfLLLST)
+import Numeric.Matrix.Integral.NormalForms (hermiteNFST)
 
 -- | Find off-diagonal entries and calculate min of min{row,col} among them
 findDiagSz :: LA.Matrix LA.Z -> Maybe Int

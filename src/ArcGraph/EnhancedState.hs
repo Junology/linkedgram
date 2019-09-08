@@ -46,9 +46,10 @@ import ArcGraph
 import ArcGraph.Component
 import ArcGraph.State
 
+import Numeric.Matrix.Integral
 import Numeric.Algebra.FreeModule as FM
 import Numeric.Algebra.Frobenius as Frob
-import Numeric.Algebra.IntMatrix
+import Numeric.Algebra.Presentation
 import Numeric.Algebra.Homology
 
 {-- for debug
@@ -119,31 +120,31 @@ enhancements deg ag st =
 -- The computation of (unnormalized) Khovanov homology
 -----------------------------------------------------------
 -- | The type to carry the data of Khovanov homologies
-data KHData ds e = KHData {
+data KHData a ds e = KHData {
   subject :: ArcGraph,
   rank :: Int,
-  tors :: [Int],
-  cycleV :: [FreeMod Int (ds, e)],
-  bndryV :: Maybe [FreeMod Int (ds, e)] }
+  tors :: [a],
+  cycleV :: [FreeMod a (ds, e)],
+  bndryV :: Maybe [FreeMod a (ds, e)] }
   deriving (Show,Eq,Generic, NFData)
 
-vecToSum :: (Integral a, Num a, LA.Element a, Ord b) => [b] -> LA.Vector a -> FreeMod Int b
-vecToSum bs v = sumFM $! zipWith (@*@%) (fromIntegral <$!> LA.toList v) bs
+vecToSum :: (Coefficient a, Ord b) => [b] -> Vec a -> FreeMod a b
+vecToSum bs v = sumFM $! zipWith (@*@%) (vecToList v) bs
 
-cohomologyToKH :: (DState ds, Enhancement ds e) => ArcGraph -> [(ds, e)] -> Bool -> Homology LA.Z -> KHData ds e
+cohomologyToKH :: (Coefficient a, DState ds, Enhancement ds e) => ArcGraph -> [(ds, e)] -> Bool -> Homology a -> KHData a ds e
 cohomologyToKH ag basis hasBndry hdata =
   let basisAGE = uncurry (AGraphE ag) <$> basis
   in KHData {
     subject = ag,
     rank = L.length (freeCycs hdata),
-    tors = fmap (fromIntegral . fst) (torsions hdata),
+    tors = fmap fst (torsions hdata),
     cycleV = fmap (vecToSum basis) (freeCycs hdata ++ fmap snd (torsions hdata)),
     bndryV = if hasBndry
              then Just (fmap (vecToSum basis) (bndries hdata))
              else Nothing }
 
 -- | Compute Khovanov homology for given range of cohomological degrees and a given quantum-degree
-computeKhovanov :: (NFData ds, NFData e, Show ds, Show e, Eq ds, Eq e, Enhancement ds e) => ArcGraph -> Int -> [ds] -> Bool -> IntMap (KHData ds e)
+computeKhovanov :: (ChainEliminable a, NFData ds, NFData e, Show ds, Show e, Eq ds, Eq e, Enhancement ds e) => ArcGraph -> Int -> [ds] -> Bool -> IntMap (KHData a ds e)
 computeKhovanov ag qdeg states hasBndry =
   let numCrs = countCross ag
       hdegs = [0..numCrs]
@@ -153,7 +154,7 @@ computeKhovanov ag qdeg states hasBndry =
       !diffs = flip (parMap rdeepseq) [0..numCrs-1] $ \i ->
         let sbasis = basisMap IMap.! i
             tbasis = basisMap IMap.! (i+1)
-        in force $! genMatrixILA (uncurry (diffEnh slimAG)) sbasis tbasis
+        in force $! present (uncurry (diffEnh slimAG)) sbasis tbasis
   in if numCrs == 0
      then -- The case where there is no crossing point;
        IMap.map (\v -> KHData slimAG (L.length v) [] (fmap (1@*@%) v) Nothing) basisMap

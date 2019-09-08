@@ -29,6 +29,8 @@ import qualified Data.Map.Strict as Map
 
 import Numeric (showFFloat)
 
+import Numeric.LinearAlgebra (Z)
+import Numeric.F2 (F2)
 import Numeric.Algebra.FreeModule
 import Numeric.Algebra.Frobenius
 
@@ -48,6 +50,12 @@ instance TeXMathShow Int where
 
 instance TeXMathShow Double where
   texMathShow x = T.pack $ showFFloat (Just 4) x ""
+
+instance TeXMathShow Z where
+  texMathShow = T.pack . show
+
+instance TeXMathShow F2 where
+  texMathShow = T.pack . show
 
 instance TeXMathShow SL2B where
   texMathShow SLI = T.singleton '1'
@@ -168,8 +176,9 @@ mkArrayLn x ys
 mathBB :: String -> Text
 mathBB c = macro "mathbb" [FixArg c]
 
-cyclicGrp :: Int -> Text
-cyclicGrp n = mathBB "Z" <> T.singleton '/' <> texMathShow n
+cyclicGrp :: (Integral a) => a -> Text
+cyclicGrp n =
+  mathBB "Z" <> T.singleton '/' <> texMathShow (fromIntegral n :: Int)
 
 ofRank :: (Integral a, TeXMathShow a) => Text -> a -> Text
 ofRank txt 1 = txt
@@ -183,13 +192,13 @@ flatZip xs@(_:_) = uncurry (:) $ foldr bin ((1,last xs),[]) (init xs)
       | y==z      = ((n+1,z),zs)
       | otherwise = ((1,y),(n,z):zs)
 
-finAbGroup :: Int -> [Int] -> Text
+finAbGroup :: (Integral a, Integral a') => a -> [a'] -> Text
 finAbGroup freeRk torsions =
   let dsum = if freeRk > 0 && not (null torsions)
              then T.pack "\\oplus "
              else T.empty
       freepart = if freeRk > 0
-                 then mathBB "Z" `ofRank` freeRk
+                 then mathBB "Z" `ofRank` (fromIntegral freeRk :: Int)
                  else T.empty
       torGrps = fmap (\tor -> cyclicGrp (snd tor) `ofRank` fst tor) (flatZip torsions)
       torpart = T.intercalate (T.pack "\\oplus ") torGrps

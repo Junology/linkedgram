@@ -27,6 +27,7 @@ import Data.Bits
 import Data.Word
 
 import Numeric (showIntAtBase)
+import Numeric.Natural (Natural)
 import Data.Char (intToDigit)
 
 import qualified Data.Vector.Unboxed as VU
@@ -70,6 +71,9 @@ unionWith f xs ys = runST $ do
 -----------------
 -- * Instances
 -----------------
+instance BitPool Natural where
+  newBits _ = foldl (\x i -> x .|. bit i) 0
+
 instance Show ChunkedBits where
   show (ChBits xs)
     = VU.foldl (\s x -> s++showBinary x) "" xs

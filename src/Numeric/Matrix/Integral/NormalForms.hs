@@ -5,16 +5,16 @@
 
 ------------------------------------------------
 -- |
--- Module    :  Numeric.Algebra.IntMatrix.NormalForms
+-- Module    :  Numeric.Matrix.Integral.NormalForms
 -- Copyright :  (c) Jun Yoshida 2019
 -- License   :  BSD3
 --
 -- Hermite Normal form and Smith normal form.
--- For the algorithms, see c-source files in src/Internal/C.
+-- The functions are implemented with C; see the source files in src/Internal/C.
 --
 ------------------------------------------------
 
-module Numeric.Algebra.IntMatrix.NormalForms (
+module Numeric.Matrix.Integral.NormalForms (
   hermiteNFST,
   hermiteNF,
   smithNFST,

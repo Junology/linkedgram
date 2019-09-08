@@ -2,7 +2,7 @@
 
 ------------------------------------------------
 -- |
--- Module    :  Numeric.Algebra.IntMatrix.HNFLLL
+-- Module    :  Numeric.Matrix.Integral.HNFLLL
 -- Copyright :  (c) Jun Yoshida 2019
 -- License   :  BSD3
 --
@@ -12,7 +12,7 @@
 --
 ------------------------------------------------
 
-module Numeric.Algebra.IntMatrix.HNFLLL (
+module Numeric.Matrix.Integral.HNFLLL (
   hnfLLLST,
   hnfLLL,
   ) where

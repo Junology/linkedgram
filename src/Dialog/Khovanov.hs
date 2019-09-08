@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleInstances, TypeSynonymInstances #-}
+
 ------------------------------------------------
 -- |
 -- Module    :  Dialog.Khovanov
@@ -12,58 +14,35 @@ module Dialog.Khovanov where
 
 import Control.Monad
 
-import Control.DeepSeq (force)
-import Control.Parallel
-import Control.Parallel.Strategies
-
 import Data.Functor ((<&>))
 import Data.Maybe
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
 import Data.List as L
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.IntMap.Strict (IntMap)
-import qualified Data.IntMap.Strict as IMap
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as MV
 import Data.IORef
 
-import System.Directory
-import System.IO
-
 import Graphics.UI.Gtk
 import qualified Graphics.Rendering.Cairo as Cairo
 
-import Data.ChunkedBits
-import Config
-import Text.TeXout
 import ArcGraph
 import ArcGraph.Common
 import ArcGraph.Component
 import ArcGraph.State
 import ArcGraph.EnhancedState
 import ArcGraph.Cairo
-import ArcGraph.TikZ
-
-import qualified Numeric.LinearAlgebra as LA
-
-import Numeric.Algebra.FreeModule
-import Numeric.Algebra.Frobenius
-import Numeric.Algebra.IntMatrix
 
 import Dialog
+
+import Dialog.Khovanov.Common
+import Dialog.Khovanov.Integral
+import Dialog.Khovanov.F2
 
 {-- for debug
 import System.IO
 import Debug.Trace
 --}
-
------------------------
--- * Orphan instances
------------------------
-instance TeXMathShow (KHData ds e) where
-  texMathShow kh = finAbGroup (rank kh) (tors kh)
 
 --------------------------
 -- * The view for states
@@ -141,31 +120,67 @@ showKhovanovDialog ag mayparent = do
     iconViewSelectAll arcGraphView
     MV.write listMVec i (smthList,arcGraphView)
     boxPackStart hboxSm arcGraphView PackNatural 3
-
   -- Add containers
   vbox <- castToBox <$> dialogGetContentArea khovanovDlg
   set vbox [ boxHomogeneous := False ]
+
   -- Scroll window containing the list of states
   scroll <- scrolledWindowNew Nothing Nothing
   scrolledWindowSetPolicy scroll PolicyAutomatic PolicyAutomatic
   scrolledWindowSetShadowType scroll ShadowIn
   boxPackStart vbox scroll PackGrow 0
   containerAdd scroll hboxSm
+
+  -- Frame containing widgets to input cohomology data
+  frameCohomology <- frameNew
+  set frameCohomology [
+    frameLabel := "Cohomology data", frameLabelXAlign := 0 ]
+  tableCohomology <- tableNew 2 2 False
+  containerAdd frameCohomology tableCohomology
   -- Spin button to input the number of positive crossings
-  hlabelCrs <- labelNew (Just "Number of positive crossings")
+  hlabelCrs <- labelNew (Just "Number of positive crossings: ")
   miscSetAlignment hlabelCrs 1.0 0.5
   let nCrs = countCross slimAG
   spinPCrs <-spinButtonNewWithRange 0 (fromIntegral nCrs) 1
+  hlabelCoeff <- labelNew (Just "Coefficients: ")
+  miscSetAlignment hlabelCoeff 1.0 0.5
+  radioCoeffZ <- radioButtonNewWithLabel "Integer"
+  radioCoeffF2 <- radioButtonNewWithLabelFromWidget radioCoeffZ "char 2"
+  hboxCoeff <- hBoxNew False 2
+  boxPackEnd hboxCoeff radioCoeffF2 PackNatural 0
+  boxPackEnd hboxCoeff radioCoeffZ PackNatural 0
+  tableAttachDefaults tableCohomology hlabelCrs 0 1 0 1
+  tableAttach tableCohomology spinPCrs 1 2 0 1 [Fill] [Fill] 3 3
+  tableAttachDefaults tableCohomology hlabelCoeff 0 1 1 2
+  tableAttach tableCohomology hboxCoeff 1 2 1 2 [Fill] [Fill] 3 3
+
+  -- Frame containing widgets to set export options.
+  frameConfig <- frameNew
+  set frameConfig [
+    frameLabel := "Export setting", frameLabelXAlign := 0 ]
+  vboxConfig <- vBoxNew False 2
+  containerAdd frameConfig vboxConfig
   -- CheckButton to detemine wheter boundaries are exported or not.
   checkBndry <- checkButtonNewWithLabel "Export boundaries"
+  toggleButtonSetActive checkBndry True -- Default: exported.
   -- CheckButton to determine degree convention for quantum-degree.
   checkSlim <- checkButtonNewWithLabel "Slim Table of Cohomology"
-  hboxConf <- hBoxNew False 3
-  boxPackStart hboxConf hlabelCrs PackNatural 0
-  boxPackStart hboxConf spinPCrs PackNatural 0
-  boxPackStart hboxConf checkBndry PackNatural 0
-  boxPackStart hboxConf checkSlim PackNatural 0
-  boxPackStart vbox hboxConf PackNatural 0
+  toggleButtonSetActive checkSlim False -- Default: not slim.
+  -- CheckButton to determine whether components are colored or not.
+  checkColor <- checkButtonNewWithLabel "Color the components"
+  toggleButtonSetActive checkColor True -- Default: colored
+  -- CheckButton to determine whether TOC appears or not.
+  checkTOC <- checkButtonNewWithLabel "Make Table-Of-Contents"
+  toggleButtonSetActive checkTOC False -- Default: no TOC
+  -- Pack CheckButton to vboxConfig
+  boxPackStart vboxConfig checkBndry PackNatural 0
+  boxPackStart vboxConfig checkSlim PackNatural 0
+  boxPackStart vboxConfig checkColor PackNatural 0
+  boxPackStart vboxConfig checkTOC PackNatural 0
+
+  -- Add all child widgets to the main vbox
+  boxPackStart vbox frameCohomology PackNatural 3
+  boxPackStart vbox frameConfig PackNatural 0
   widgetShowAll khovanovDlg
 
   btnExport `on` buttonActivated $ do
@@ -180,80 +195,28 @@ showKhovanovDialog ag mayparent = do
           =<< (map head <$> iconViewGetSelectedItems agView :: IO [Int])
       -- The bound for quantum degrees
       let maxQDeg = let (AGraph ps _) = slimAG in L.length ps
-      -- Read options
-      hasBndry <- toggleButtonGetActive checkBndry
+      -- Read settings
+      exportKh <- toggleButtonGetActive radioCoeffZ >>= \b ->
+        if b then return exportKhovanovZ else return exportKhovanovF2
       nPCrs <- spinButtonGetValueAsInt spinPCrs
+      hasBndry <- toggleButtonGetActive checkBndry
       modif <- toggleButtonGetActive checkSlim <&> \ifslim -> \i j ->
         if ifslim
         then (i-(nCrs-nPCrs), j-2*i+nPCrs)
         else (i-(nCrs-nPCrs), j-2*(nCrs-nPCrs)+nPCrs)
-
-      -- Compute Khovanov homology
-      khMapRef <- newIORef (Map.empty :: Map (Int,Int) (KHData IListState (MapEState (ArcBits ChunkedBits))))
-      forM_ [-maxQDeg..maxQDeg] $ \j -> do
-        -- Pass ag instead of slimAG.
-        let !jkhMap = force $ computeKhovanov ag j states hasBndry
-        forM_ (IMap.toList jkhMap) $ \ikh -> do
-          let (i,kh) = ikh
-          modifyIORef' khMapRef (Map.insert (modif i j) kh)
-      khMap <- readIORef khMapRef
-
-      -- Export TeX source
-      handle <- openFile (fromJust mayfname) WriteMode
-      T.hPutStrLn handle $ documentClass "pdftex,a4paper" "scrartcl"
-      T.hPutStrLn handle $ T.empty
-      T.hPutStrLn handle $ usePackage "" "amsmath,amssymb"
-      T.hPutStrLn handle $ usePackage "" "tikz"
-      T.hPutStrLn handle $ macro "allowdisplaybreaks" [OptArg "2"]
-      T.hPutStrLn handle $ T.empty
-      T.hPutStrLn handle $ beginEnv "document" []
-      T.hPutStrLn handle $ beginEnv "center" []
-      T.hPutStrLn handle $ beginEnv "tikzpicture" []
-      T.hPutStrLn handle $ showArcGraphTikzWithComp 0.15 (normalize 2.0 slimAG)
-      T.hPutStrLn handle $ endEnv "tikzpicture"
-      T.hPutStrLn handle $ endEnv "center"
-      T.hPutStrLn handle $ T.empty
-      T.hPutStrLn handle $ macro "section*" [FixArg "Table of Homology Groups"]
-      T.hPutStrLn handle $ beginEnv "equation*" []
-      T.hPutStrLn handle $ texMathShow khMap
-      T.hPutStrLn handle $ endEnv "equation*"
-      T.hPutStrLn handle $ T.empty
-      T.hPutStrLn handle $ macro "tableofcontents" []
-      T.hPutStrLn handle $ T.empty
-      forM_ (Map.toList khMap) $ \ijkh -> do
-        let ((i,j),kh) = ijkh
-            sectionName = "The group $Kh^{" ++ show i ++ "," ++ show j ++ "}$"
-        T.hPutStrLn handle $ macro "section*" [FixArg sectionName ]
-        T.hPutStrLn handle $ macro "addcontentsline" [
-          FixArg "toc", FixArg "section", FixArg sectionName ]
-        T.hPutStrLn handle $ beginEnv "equation*" []
-        T.hPutStrLn handle $ texMathShow kh
-        T.hPutStrLn handle $ endEnv "equation*"
-        T.hPutStrLn handle $ T.empty
-        T.hPutStrLn handle $ macro "subsection*" [FixArg "Generating Cycle"]
-        forM_ (cycleV kh) $ \cyc -> do
-          let (isMult,tex) = showStateSumTikzMultlined slimAG cyc 5
-              envName = if isMult
-                        then "multline*"
-                        else "equation*"
-          T.hPutStrLn handle $ beginEnv envName []
-          T.hPutStrLn handle $ tex
-          T.hPutStrLn handle $ endEnv envName
-        T.hPutStrLn handle $ T.empty
-        when (isJust (bndryV kh)) $ do
-          T.hPutStrLn handle $ macro "subsection*" [FixArg "Boundaries"]
-          forM_ (fromMaybe [] (bndryV kh)) $ \bnd -> do
-            let (isMult,tex) = showStateSumTikzMultlined slimAG bnd 5
-                envName = if isMult
-                          then "multline*"
-                          else "equation*"
-            T.hPutStrLn handle $ beginEnv envName []
-            T.hPutStrLn handle $ tex
-            T.hPutStrLn handle $ endEnv envName
-          T.hPutStrLn handle $ T.empty
-      T.hPutStrLn handle $ endEnv "document"
-      hClose handle
-      -- writeFile (fromJust mayfname) (docKhovanovTikz ag "pdftex,a4paper" "scrartcl" khMap)
+      color <- toggleButtonGetActive checkColor
+      toc <- toggleButtonGetActive checkTOC
+      let cfg = ExpConfig {
+            filePath = fromJust mayfname,
+            targetArcGraph = ag,
+            statesUsed = states,
+            qdegBnd = maxQDeg,
+            numPCrs = nPCrs,
+            hasBndry = hasBndry,
+            degModifier = modif,
+            hasTOC = toc,
+            isColored = color }
+      exportKh cfg
 
   -- Close the dialog when "Close" is pressed
   btnClose `on` buttonActivated $ do

@@ -27,12 +27,6 @@ import qualified Data.Maybe as M
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 
-import Data.Matrix (Matrix)
-import qualified Data.Matrix as Mat
-
-import qualified Numeric.LinearAlgebra as LA
-import qualified Numeric.LinearAlgebra.Devel as LA
-
 import Data.Foldable
 
 ------------------
@@ -195,33 +189,3 @@ insertMapFM f (FMod mp)
 mapFM :: (Eq a, Num a, Ord b, Ord c)
   => (b -> FreeMod a c) -> FreeMod a [b] -> FreeMod a [c]
 mapFM f = insertMapFM (const (Right f))
-
------------------------------
--- * Matrix representation --
------------------------------
-genMatrix :: (Num a, Ord c) => (b -> FreeMod a c) -> [b] -> [c] -> Matrix a
-genMatrix _ [] _ = Mat.fromList 0 0 []
-genMatrix f dom cod
-  = let domRk = length dom
-        codRk = length cod
-        el j i = if i <= domRk && j <= codRk
-                 then getCoeff (cod !! (j-1)) (f (dom !! (i-1)))
-                 else 0
-    in Mat.matrix codRk domRk $ uncurry el
-
-genMatrixAR :: (Num a, Ord c) => (b -> FreeMod a c) -> [b] -> Matrix a
-genMatrixAR f dom
-  = let cod = L.nub $ L.concatMap spanning $ fmap f dom
-    in genMatrix f dom cod
-
-genMatrixILA :: (Integral a, Num a', LA.Element a', Ord c) => (b -> FreeMod a c) -> [b] -> [c] -> LA.Matrix a'
-genMatrixILA f dom cod
-  = let domRk = length dom
-        codRk = length cod
-    in runST $ do
-  stMat <- LA.newUndefinedMatrix LA.RowMajor codRk domRk
-  forM_ [0..codRk-1] $ \i ->
-    forM_ [0..domRk-1] $ \j -> do
-      let coeff = getCoeff (cod !! i) (f (dom !! j))
-      LA.unsafeWriteMatrix stMat i j (fromIntegral coeff)
-  LA.unsafeFreezeMatrix stMat

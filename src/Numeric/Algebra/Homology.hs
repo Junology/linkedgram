@@ -18,7 +18,7 @@
 ------------------------------------------------
 
 module Numeric.Algebra.Homology
-  (Homology(..), homology) where
+  (ChainEliminable, Homology(..), homology) where
 
 import GHC.Generics (Generic, Generic1)
 import Control.DeepSeq (NFData, force)
@@ -46,8 +46,11 @@ import qualified Data.Vector.Mutable as MV
 
 import Numeric.Algebra.FreeModule
 import Numeric.Algebra.Presentation
-import Numeric.Algebra.IntMatrix
-import Numeric.Algebra.IntMatrix.NormalForms
+import Numeric.Matrix.Integral
+import Numeric.Matrix.Integral.NormalForms
+import Numeric.F2 (F2)
+import qualified Numeric.Matrix.F2 as F2
+import qualified Numeric.Matrix.F2.Mutable as F2
 
 {-- for Debug
 import Debug.Trace
@@ -140,3 +143,14 @@ instance ChainEliminable LA.Z where
               else return $ (LA.rows matA LA.>< 0) []
     return (SmithNF invFs resBasis fimage, fcoker)
 
+instance ChainEliminable F2 where
+  elimChainHead basis matA = runST $ do
+    stMatA <- F2.thawMatrixF2 matA
+    stBasis <- F2.thawMatrixF2 basis
+    stU <- F2.newIdentF2 (F2.rows matA)
+    -- Compute the Smith normal form
+    rk <- F2.mdiagRepF2 stU stMatA stBasis
+    -- Write the new basis of the source
+    resBasis <- F2.unsafeFreezeMatrixF2 stBasis
+    (fimage,fcoker) <- F2.splitColumnsAt rk <$> F2.unsafeFreezeMatrixF2 stU
+    return (DiagNF rk resBasis fimage, fcoker)

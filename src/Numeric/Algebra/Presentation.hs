@@ -7,11 +7,11 @@
 
 ------------------------------------------------
 -- |
--- Module    :  Numeric.Algebra.IntChain
+-- Module    :  Numeric.Algebra.Presentation
 -- Copyright :  (c) Jun Yoshida 2019
 -- License   :  BSD3
 --
--- Chain complexes over integers
+-- Matrix presentations of morphisms
 --
 ------------------------------------------------
 
@@ -29,7 +29,10 @@ import qualified Numeric.LinearAlgebra as LA
 import qualified Numeric.LinearAlgebra.Devel as LA
 
 import Numeric.Algebra.FreeModule
-import Numeric.Algebra.IntMatrix
+import Numeric.Matrix.Integral
+import Numeric.F2 (F2)
+import qualified Numeric.Matrix.F2 as F2
+import qualified Numeric.Matrix.F2.Mutable as F2
 
 
 ---------------
@@ -45,6 +48,8 @@ class (Eq a, Num a, NFData a, Semigroup (Mat a), NFData (Vec a), NFData (Mat a))
   -- ^ Presentation of the identity of the given rank.
   present :: (Integral a', NFData a', Ord c, NFData c) => (b->FreeMod a' c) -> [b] -> [c] -> Mat a
   -- ^ Present a linear map in a matrix form with respect to a given bases
+  vecToList :: Vec a -> [a]
+  -- ^ Vec a is convertible to a list.
   rankVec :: Vec a -> Int
   -- ^ The rank of the module where the given vector lies.
   rankDom :: Mat a -> Int
@@ -60,9 +65,16 @@ class (Eq a, Num a, NFData a, Semigroup (Mat a), NFData (Vec a), NFData (Mat a))
   -- ^ The scalar matrix of the given size.
   (@|>) :: Mat a -> Vec a -> Vec a
   -- ^ Multiplication of matrices and vectors.
-  (@|>) x = head . toVecs . (x<>) . fromVecs . (:[])
   scale :: a -> Vec a -> Vec a
   -- ^ Scalar multiplication on vectors.
+  scalar :: Int -> a -> Mat a
+  -- ^ Scalar * identity matrix.
+  -- | Default implementations
+  ident n = scalar n 1
+  rankVec = length . vecToList
+  (@|>) x = head . toVecs . (x<>) . fromVecs . (:[])
+  scale x v = scalar (rankVec v) x @|> v
+  scalar n x = fromVecs (map (scale x) (toVecs (ident n)))
 
 -- | Matrix presentations with normal forms.
 class (Coefficient a, NFData (NormalForm a)) => Normalized a where
@@ -85,9 +97,9 @@ class (Coefficient a, NFData (NormalForm a)) => Normalized a where
   -- ^ Each normal form should contain the data of "invariant factors;" e.g. those for Smith normal forms of matrices with coefficients in a PID.
 
 
----------------------------------------
--- * Instances for LA.Z using hmatrix
----------------------------------------
+------------------------------------------------
+-- * Instances in terms of LA.Z using hmatrix
+------------------------------------------------
 instance Coefficient (LA.Z) where
   type Vec LA.Z = LA.Vector LA.Z
   type Mat LA.Z = LA.Matrix LA.Z
@@ -103,6 +115,7 @@ instance Coefficient (LA.Z) where
         let coeff = getCoeff (cod !! i) vals
         LA.unsafeWriteMatrix stMat i j (fromIntegral coeff)
     LA.unsafeFreezeMatrix stMat
+  vecToList = LA.toList
   rankVec = LA.size
   rankDom = LA.cols
   rankCod = LA.rows
@@ -122,7 +135,7 @@ instance Normalized (LA.Z) where
     = runST $ do
     stMat <- LA.newMatrix 0 (LA.cols bts) (LA.cols bss)
     forM_ [0..(LA.size invs)-1] $ \i ->
-      LA.writeMatrix stMat i i  1
+      LA.writeMatrix stMat i i  (invs `LA.atIndex` i)
     LA.unsafeFreezeMatrix stMat
   basisDom = _basisS
   basisCod = _basisT
@@ -130,3 +143,41 @@ instance Normalized (LA.Z) where
     = let (u,s,v) = smithRep x
       in SmithNF (LA.takeDiag s) v u
   invariants = LA.toList . _invFactor
+
+---------------------------------
+-- * Instances in terms of F2
+---------------------------------
+instance Coefficient F2 where
+  type Vec F2 = F2.VectorF2
+  type Mat F2 = F2.MatrixF2
+  ident = F2.ident
+  present f dom cod
+    = let domRk = length dom
+          codRk = length cod
+      in runST $ do
+    stMat <- F2.unsafeNewMatrixF2 codRk domRk
+    forM_ [0..domRk-1] $ \j -> do
+      let !vals = force $ f (dom !!j)
+      forM_ [0..codRk-1] $ \i -> do
+        let coeff = getCoeff (cod !! i) vals
+        F2.unsafeWriteMatrixF2 stMat i j (fromIntegral coeff :: F2)
+    F2.unsafeFreezeMatrixF2 stMat
+  vecToList = F2.toList
+  rankVec = F2.sizeF2
+  rankDom = F2.cols
+  rankCod = F2.rows
+  fromVecs = F2.fromColumns . toList
+  toVecs = F2.toColumns
+  scalar = F2.scalar
+
+instance Normalized F2 where
+  data NormalForm F2 =
+    DiagNF {-# UNPACK #-} !Int {-# UNPACK #-} !F2.MatrixF2 {-# UNPACK #-} !F2.MatrixF2
+    deriving (Show, Generic,NFData)
+  invariants (DiagNF rk _ _) = replicate rk 1
+  basisDom (DiagNF _ bss _) = bss
+  basisCod (DiagNF _ _ bst) = bst
+  fromNF (DiagNF rk bss bst) = F2.diagRectL (rankCod bst) (rankCod bss) (repeat 1 :: [Int])
+  toNF x
+    = let (u,rk,v) = F2.diagRep x
+      in DiagNF rk v u

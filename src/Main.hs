@@ -70,10 +70,6 @@ mainDraw wid hei appData = do
 
 main :: IO ()
 main = do
-  {-- Debug
-  print $ genMatrix differential (L.concatMap enhancedStatesL (listSmoothing [1] trefoil)) (L.concatMap enhancedStatesL (listSmoothing [2] trefoil))
-  --}--
-
   -- Fix the size of the main window
   let winWidth = 640
   let winHeight = 480

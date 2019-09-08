@@ -1,6 +1,6 @@
 ------------------------------------------------
 -- |
--- Module    :  Numeric.Algebra.IntMatrix
+-- Module    :  Numeric.Matrix.Integral
 -- Copyright :  (c) Jun Yoshida 2019
 -- License   :  BSD3
 --
@@ -8,20 +8,12 @@
 --
 ------------------------------------------------
 
-module Numeric.Algebra.IntMatrix (
+module Numeric.Matrix.Integral (
   -- Hermite normal form
   hermiteNF,
   -- Smith normal form
   smithNF,
   smithRep,
-  -- Compute Image and Kernel
-  kerImOf,
-  -- Translation
-  vectiLAToData,
-  matiDataToLA,
-  matdDataToLA,
-  matiLAToData,
-  matdLAToData
   ) where
 
 import Control.Monad
@@ -29,14 +21,12 @@ import Control.Monad.ST (ST, runST)
 import Control.Monad.Loops (whileM_)
 import Data.STRef
 
---import Numeric.Algebra.IntMatrix.HNFLLL
---import Numeric.Algebra.IntMatrix.SmithNF
-import Numeric.Algebra.IntMatrix.NormalForms
-
 import qualified Numeric.LinearAlgebra as LA
 
-import qualified Data.Vector as V
-import qualified Data.Matrix as Mat
+--import Numeric.Matrix.Integral.HNFLLL
+--import Numeric.Matrix.Integral.SmithNF
+import Numeric.Matrix.Integral.NormalForms
+
 
 -- Compute the submatrix containing all the non-zero diagonal entries
 extractMaxNZDiag :: LA.Matrix LA.Z -> (Int,LA.Matrix LA.Z)
@@ -62,25 +52,3 @@ kerImOf mt =
       im' = (ulr LA.<> ull LA.<> h) LA.¿ [0..rk-1]
       (_,imt) = hermiteNF (LA.tr' im')
   in (LA.takeDiag dmt, LA.toRows kert, LA.toRows imt)
-
--------------------------
--- Translation of data --
--------------------------
-vectiLAToData :: (Num a) => LA.Vector LA.Z -> V.Vector a
-vectiLAToData = V.fromList . map fromIntegral . LA.toList
-
-matiDataToLA :: Integral a => Mat.Matrix a -> LA.Matrix LA.Z
-matiDataToLA mt =
-  (LA.><) (Mat.nrows mt) (Mat.ncols mt) (map fromIntegral $ Mat.toList mt)
-
-matdDataToLA :: Mat.Matrix Double -> LA.Matrix Double
-matdDataToLA mt =
-  (LA.><) (Mat.nrows mt) (Mat.ncols mt) (Mat.toList mt)
-
-matiLAToData :: Num a => LA.Matrix LA.Z -> Mat.Matrix a
-matiLAToData mt =
-  Mat.fromList (LA.rows mt) (LA.cols mt) $ map fromIntegral $ LA.toList $ LA.flatten mt
-
-matdLAToData :: LA.Matrix Double -> Mat.Matrix Double
-matdLAToData mt =
-  Mat.fromList (LA.rows mt) (LA.cols mt) $ LA.toList $ LA.flatten mt

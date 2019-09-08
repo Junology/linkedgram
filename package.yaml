@@ -20,7 +20,7 @@ dependencies:
   - deepseq
   - vector
   - text
-  - matrix
+  - primitive
   - hmatrix
   - directory
   - bitarray
