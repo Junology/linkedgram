@@ -101,7 +101,7 @@ showKhovanovDialog ag mayparent = do
     Just win -> set khovanovDlg [windowTransientFor := win]
     Nothing  -> return()
   set khovanovDlg [
-    windowTitle := "Compute (unnormalized) Khovanov Chain",
+    windowTitle := "Compute Khovanov homology",
     windowWindowPosition := WinPosCenter,
     windowDefaultWidth := 640,
     windowDefaultHeight := 480 ]

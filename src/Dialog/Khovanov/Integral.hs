@@ -53,9 +53,10 @@ instance TeXMathShow (KHData LA.Z ds e) where
 exportKhovanovZ :: ExportConfig -> IO ()
 exportKhovanovZ cfg@(ExpConfig _ ag states maxQDeg nPCrs hasBndry modif _ _) = do
   let slimAG = slimCross $ normalize 1.0 ag
+      numCrs = countCross ag
   -- Compute Khovanov homology
   khMapRef <- newIORef (Map.empty :: Map (Int,Int) (KHData LA.Z IListState (MapEState (ArcBits Natural))))
-  forM_ [-maxQDeg..maxQDeg] $ \j -> do
+  forM_ [-maxQDeg..maxQDeg+numCrs] $ \j -> do
     -- Pass ag instead of slimAG.
     let !jkhMap = force $ computeKhovanov ag j states hasBndry
     forM_ (IMap.toList jkhMap) $ \ikh -> do
