@@ -150,7 +150,7 @@ computeKhovanov ag qdeg states hasBndry =
       hdegs = [0..numCrs]
       slimAG = slimCross ag
       basis i = L.concatMap (\st -> (,) st <$> listEnh qdeg slimAG st) (filter ((==i). degree slimAG) states)
-      basisMap = IMap.fromAscList (map (\i -> (i,basis i)) hdegs)
+      !basisMap = force (IMap.fromAscList (map (\i -> (i,basis i)) hdegs))
       !diffs = flip (parMap rdeepseq) [0..numCrs-1] $ \i ->
         let sbasis = basisMap IMap.! i
             tbasis = basisMap IMap.! (i+1)
@@ -159,6 +159,6 @@ computeKhovanov ag qdeg states hasBndry =
      then -- The case where there is no crossing point;
        IMap.map (\v -> KHData slimAG (L.length v) [] (fmap (1@*@%) v) Nothing) basisMap
      else -- The case where there is at least one crossing point;
-       let !hdata = force $ homology diffs
+       let !hdata = force (homology diffs)
            !hdataMap = IMap.fromAscList $ filter (\hdti -> not (null (freeCycs (snd hdti)) && null (torsions (snd hdti))) ) $ zip hdegs hdata
        in flip IMap.mapWithKey hdataMap $ \i hdt -> cohomologyToKH slimAG (basisMap IMap.! i) hasBndry hdt

@@ -21,7 +21,7 @@ module Numeric.Algebra.Homology
   (ChainEliminable, Homology(..), homology) where
 
 import GHC.Generics (Generic, Generic1)
-import Control.DeepSeq (NFData, force)
+import Control.DeepSeq (NFData, force, deepseq)
 
 import Control.Parallel.Strategies
 
@@ -102,21 +102,18 @@ chainToNormals = first (maybe (ident 0) id) . mapAccumL chainToNormals' Nothing
       = let (u,mat') = case mayU of
                          Just u -> (u, mat <> u)
                          Nothing -> (ident (rankDom mat), mat)
-            (matNF, coker) = elimChainHead u mat'
+            !(!matNF, !coker) = force (elimChainHead u mat')
         in (Just coker, matNF)
 
 -- | Compute homology group with integral coefficient.
 homology :: (ChainEliminable a, Traversable t, Alternative t, NFData (t (NormalForm a)), NFData (t (Homology a, Homology a))) => t (Mat a) -> t (Homology a)
 homology diffs =
-  let (!coker, !nfs) = force (chainToNormals diffs)
+  let !(!coker, !nfs) = force (chainToNormals diffs)
       !hs = force (fmap homologyOfNF nfs `using` parTraversable (rparWith rdeepseq))
   in (uncurry ((<|>) . pure)) (mapAccumR pile (Homology (toVecs coker) [] []) hs)
   where
     pile (Homology cycs _ _) (thisH, nextCycH) =
       (nextCycH, thisH {freeCycs = cycs})
-
-intHomology :: [LA.Matrix LA.Z] -> [Homology LA.Z]
-intHomology = homology
 
 -----------------
 -- * Instances
