@@ -47,9 +47,7 @@ executables:
     - -DPROJECT_COPYRIGHT_YEAR="2019"
     - -DPROJECT_LICENSE="BSD3"
     - -DPROJECT_HOMEPAGE="https://github.com/Junology/linkedgram#readme"
-    ld-options: -O3 -march=native
-    extra-libraries:
-    - omp
+    ld-options: -O3 -fopenmp -march=native
 
 tests:
   linkedgram-test:
@@ -63,7 +61,7 @@ tests:
     - -with-rtsopts=-N
     c-sources:
     - src/Internal/C/**/*.c
-    cc-options: -O3 -march=native
+    cc-options: -O3 -fopenmp -march=native
     cpp-options:
     - -DPROJECT_NAME="linkedgram"
     - -DPROJECT_VERSION="0.1.0.0"
@@ -72,9 +70,7 @@ tests:
     - -DPROJECT_COPYRIGHT_YEAR="2019"
     - -DPROJECT_LICENSE="BSD3"
     - -DPROJECT_HOMEPAGE="https://github.com/Junology/linkedgram#readme"
-    ld-options: -O3 -march=native
-    extra-libraries:
-    - omp
+    ld-options: -O3 -fopenmp -march=native
 #    dependencies:
 #    - linkedgram
 
@@ -100,7 +96,5 @@ benchmarks:
     - -with-rtsopts=-N
     c-sources:
     - src/Internal/C/**/*.c
-    cc-options: -O3 -march=native
-    ld-options: -O3 -march=native
-    extra-libraries:
-    - omp
+    cc-options: -O3 -fopenmp -march=native
+    ld-options: -O3 -fopenmp -march=native
